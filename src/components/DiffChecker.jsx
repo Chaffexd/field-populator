@@ -74,9 +74,44 @@ function buildFieldUrl({ spaceId, environmentId, entryId, fieldKey }) {
 }
 
 /**
+ * Try to parse an "asset JSON" value of the shape:
+ * {
+ *   "altText": "...",
+ *   "assetUrl": "https://...",
+ *   ...
+ * }
+ */
+function parseAssetFromString(value) {
+  if (!value || typeof value !== "string") return null;
+
+  try {
+    const json = JSON.parse(value);
+
+    if (json && typeof json === "object") {
+      if (
+        json.assetUrl &&
+        typeof json.assetUrl === "string" &&
+        json.assetUrl.length > 0
+      ) {
+        return {
+          isImage: true,
+          url: json.assetUrl,
+          alt: json.altText || "",
+        };
+      }
+    }
+  } catch {
+    // Not JSON or not in expected shape – ignore
+  }
+
+  return null;
+}
+
+/**
  * Recursive node renderer
  * - field nodes: left=green source-only, right=red target-only
  * - reference nodes: collapsible; children link to the referenced entry's fields
+ * - reference-list nodes: wrapper for arrays of entry references
  * - adds a checkbox to adopt this field (granular control)
  */
 function NodeRenderer({
@@ -92,6 +127,7 @@ function NodeRenderer({
 }) {
   const indentStyle = { marginLeft: `${level * 20}px` };
 
+  // ---------------- FIELD NODE ----------------
   if (node.type === "field") {
     const changed = node.source !== node.target;
     const fieldUrl = buildFieldUrl({
@@ -101,7 +137,33 @@ function NodeRenderer({
       fieldKey,
     });
 
-    const checked = Boolean(selected?.[entryId]?.has(fieldKey));
+    const selectedSet = selected?.[entryId];
+    const explicitlySelected = Boolean(
+      selectedSet && selectedSet.has(fieldKey)
+    );
+    const checked = adoptAll ? true : explicitlySelected;
+
+    // Image support:
+    // 1) explicit isImage from buildDiffTree (asset links)
+    // 2) inferred from JSON (assetUrl)
+    const sourceAsset = parseAssetFromString(node.source);
+    const targetAsset = parseAssetFromString(node.target);
+    const hasJsonImage = Boolean(sourceAsset || targetAsset);
+    const hasAssetLinkImage = Boolean(node.isImage);
+    const isImageField = hasAssetLinkImage || hasJsonImage;
+
+    const sourceImageUrl =
+      hasAssetLinkImage && node.sourceImageUrl
+        ? node.sourceImageUrl
+        : sourceAsset?.url;
+    const targetImageUrl =
+      hasAssetLinkImage && node.targetImageUrl
+        ? node.targetImageUrl
+        : targetAsset?.url;
+    const sourceAlt =
+      (hasAssetLinkImage ? fieldKey : sourceAsset?.alt) || fieldKey;
+    const targetAlt =
+      (hasAssetLinkImage ? fieldKey : targetAsset?.alt) || fieldKey;
 
     return (
       <div
@@ -150,7 +212,7 @@ function NodeRenderer({
                 onToggleField(entryId, fieldKey, e.target.checked)
               }
             />
-            {adoptAll ? "Adopt-all enabled" : "Adopt this field"}
+            {checked ? "Adopt this field" : "Do not adopt this field"}
           </label>
         </div>
 
@@ -160,17 +222,39 @@ function NodeRenderer({
             <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
               Source
             </em>
-            <div style={fieldBoxStyle}>
-              {node.source === "" ? (
-                "(empty)"
-              ) : (
-                <span
-                  dangerouslySetInnerHTML={{
-                    __html: renderDiffHtmlSourceGreen(node.source, node.target),
-                  }}
-                />
-              )}
-            </div>
+            {isImageField ? (
+              <div style={{ ...fieldBoxStyle, textAlign: "center" }}>
+                {sourceImageUrl ? (
+                  <img
+                    src={sourceImageUrl}
+                    alt={sourceAlt}
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: 200,
+                      objectFit: "contain",
+                      borderRadius: 4,
+                    }}
+                  />
+                ) : (
+                  <span>(no image)</span>
+                )}
+              </div>
+            ) : (
+              <div style={fieldBoxStyle}>
+                {node.source === "" ? (
+                  "(empty)"
+                ) : (
+                  <span
+                    dangerouslySetInnerHTML={{
+                      __html: renderDiffHtmlSourceGreen(
+                        node.source,
+                        node.target
+                      ),
+                    }}
+                  />
+                )}
+              </div>
+            )}
           </div>
 
           {/* RIGHT = TARGET (red for Target-only segments) */}
@@ -178,23 +262,70 @@ function NodeRenderer({
             <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
               Target
             </em>
-            <div style={fieldBoxStyle}>
-              {node.target === "(empty)" ? (
-                "(empty)"
-              ) : (
-                <span
-                  dangerouslySetInnerHTML={{
-                    __html: renderDiffHtmlTargetRed(node.source, node.target),
-                  }}
-                />
-              )}
-            </div>
+            {isImageField ? (
+              <div style={{ ...fieldBoxStyle, textAlign: "center" }}>
+                {targetImageUrl ? (
+                  <img
+                    src={targetImageUrl}
+                    alt={targetAlt}
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: 200,
+                      objectFit: "contain",
+                      borderRadius: 4,
+                    }}
+                  />
+                ) : (
+                  <span>(no image)</span>
+                )}
+              </div>
+            ) : (
+              <div style={fieldBoxStyle}>
+                {node.target === "(empty)" ? (
+                  "(empty)"
+                ) : (
+                  <span
+                    dangerouslySetInnerHTML={{
+                      __html: renderDiffHtmlTargetRed(node.source, node.target),
+                    }}
+                  />
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
+  // ---------------- REFERENCE-LIST NODE (Array of entry links) ----------------
+  if (node.type === "reference-list") {
+    return (
+      <div style={{ ...indentStyle, marginBottom: 10 }}>
+        <strong style={{ display: "block", marginBottom: 6 }}>
+          {fieldKey}
+        </strong>
+        <div style={{ display: "grid", gap: 8 }}>
+          {Object.entries(node.children).map(([childEntryId, childNode]) => (
+            <CollapsibleReference
+              key={childEntryId}
+              fieldKey={childEntryId}
+              node={childNode}
+              level={level + 1}
+              spaceId={spaceId}
+              environmentId={environmentId}
+              entryId={childNode.linkEntryId || childEntryId}
+              selected={selected}
+              onToggleField={onToggleField}
+              adoptAll={adoptAll}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------- SINGLE REFERENCE NODE ----------------
   if (node.type === "reference") {
     return (
       <CollapsibleReference
@@ -208,6 +339,7 @@ function NodeRenderer({
         entryId={node.linkEntryId || node.id}
         selected={selected}
         onToggleField={onToggleField}
+        adoptAll={adoptAll}
       />
     );
   }

@@ -38,6 +38,42 @@ function isPairAllowed(sourceCode, targetCode) {
   return targetCode === sourceCode || targetCode.startsWith(`${srcBase}-`);
 }
 
+// Flatten diffTree into a list of { entryId, fieldId } so we can build
+// "all fields except this one" when the user deselects a field in adoptAll mode.
+function collectFields(tree, rootEntryId) {
+  const result = [];
+
+  const walk = (nodeMap, currentEntryId) => {
+    if (!nodeMap) return;
+
+    Object.entries(nodeMap).forEach(([key, node]) => {
+      if (!node) return;
+
+      if (node.type === "field") {
+        result.push({ entryId: currentEntryId, fieldId: key });
+      } else if (node.type === "reference") {
+        const childEntryId = node.linkEntryId || node.id || currentEntryId;
+        if (node.children) {
+          walk(node.children, childEntryId);
+        }
+      } else if (node.type === "reference-list") {
+        // Array of references: walk each referenced entry's children
+        Object.values(node.children || {}).forEach((childNode) => {
+          if (!childNode) return;
+          const childEntryId =
+            childNode.linkEntryId || childNode.id || currentEntryId;
+          if (childNode.children) {
+            walk(childNode.children, childEntryId);
+          }
+        });
+      }
+    });
+  };
+
+  walk(tree, rootEntryId);
+  return result;
+}
+
 const Dialog = () => {
   const sdk = useSDK();
   const cma = useMemo(() => cmaSDK(sdk), [sdk]);
@@ -52,6 +88,7 @@ const Dialog = () => {
 
   const [adoptStatus, setAdoptStatus] = useState("idle");
   const [adoptAll, setAdoptAll] = useState(true);
+  const [allFields, setAllFields] = useState([]); // [{ entryId, fieldId }]
 
   // Per-field selections
   const [selected, setSelected] = useState({});
@@ -110,6 +147,7 @@ const Dialog = () => {
         });
 
         setDiffData(tree);
+        setAllFields(collectFields(tree, entryId)); // track all fields in this diff
         setError(null);
       } catch (err) {
         console.error(err);
@@ -136,9 +174,28 @@ const Dialog = () => {
     setAdoptMsg(null);
   }, [sourceLocale, targetLocale]);
 
-  // Toggle field selection
   const onToggleField = (entryIdForField, fieldId, isChecked) => {
-    setAdoptAll(false);
+    // If adoptAll was true and user unticks even one → turn off adoptAll
+    if (adoptAll && !isChecked) {
+      setAdoptAll(false);
+
+      // Build explicit selected list = all fields except the one they unchecked
+      setSelected(() => {
+        const next = {};
+
+        (allFields || []).forEach(({ entryId, fieldId: fid }) => {
+          if (entryId === entryIdForField && fid === fieldId) return; // skip unchecked
+          if (!next[entryId]) next[entryId] = new Set();
+          next[entryId].add(fid);
+        });
+
+        return next;
+      });
+
+      return;
+    }
+
+    // Normal partial-mode behaviour (explicit selections)
     setSelected((prev) => {
       const next = { ...prev };
       const set = new Set(next[entryIdForField] || []);
@@ -251,6 +308,7 @@ const Dialog = () => {
         });
 
         setDiffData(tree);
+        setAllFields(collectFields(tree, entryId)); // keep allFields in sync
       }
 
       setAdoptStatus("success");

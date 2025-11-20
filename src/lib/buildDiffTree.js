@@ -1,25 +1,3 @@
-/**
- * Recursively builds a structured diff tree for an entry.
- *
- * - Localized scalar fields → compare source vs target
- * - Non-localized scalar fields → skipped
- * - Reference fields (Link → Entry) → ALWAYS recurse (even if non-localized)
- *   The referenced entry's localized fields are compared by source/target locale.
- *
- * Returns:
- * {
- *   fieldId: {
- *     type: 'field',
- *     source: string | "(empty)" | "",
- *     target: string | "(empty)" | ""
- *   } | {
- *     type: 'reference',
- *     id: string,            // label (can show "srcId → tgtId")
- *     linkEntryId: string,   // the actual entry id we traversed (for deep-links)
- *     children: {...diff tree of referenced entry...}
- *   }
- * }
- */
 import { callCMA } from "./rateLimiter";
 
 export async function buildDiffTree({
@@ -30,6 +8,7 @@ export async function buildDiffTree({
   defaultLocale,
   cache,
   ctCache = {},
+  assetCache = {},
 }) {
   const tree = {};
   if (!entry?.fields) return tree;
@@ -59,12 +38,17 @@ export async function buildDiffTree({
     const def = fieldDefs[fieldId];
     if (!def) continue;
 
-    const isRef = def.type === "Link" && def.linkType === "Entry";
+    const isEntryRef = def.type === "Link" && def.linkType === "Entry";
+    const isEntryArrayRef =
+      def.type === "Array" &&
+      def.items?.type === "Link" &&
+      def.items.linkType === "Entry";
+    const isAssetLink = def.type === "Link" && def.linkType === "Asset";
 
     // -----------------------------
-    // 1) REFERENCE FIELDS (handled first)
+    // 1) SINGLE ENTRY REFERENCE FIELDS
     // -----------------------------
-    if (isRef) {
+    if (isEntryRef) {
       // Helper: get the link value for a side
       const getLinkForSide = (wantedLocale) => {
         if (def.localized) {
@@ -118,15 +102,165 @@ export async function buildDiffTree({
         defaultLocale,
         cache,
         ctCache,
+        assetCache,
       });
 
       tree[fieldId] = {
         type: "reference",
         id:
           srcId && tgtId && srcId !== tgtId ? `${srcId} → ${tgtId}` : chosenId,
-        linkEntryId: chosenId, // ✅ always provide the actual id for deep-linking
+        linkEntryId: chosenId, // for deep-linking and selection
         children,
       };
+      continue;
+    }
+
+    // -----------------------------
+    // 1a) MULTI ENTRY REFERENCE (ARRAY OF LINKS) – NEW
+    // -----------------------------
+    if (isEntryArrayRef) {
+      const getLinksForSide = (wantedLocale) => {
+        if (def.localized) {
+          return localizedValues?.[wantedLocale] ?? [];
+        }
+
+        const raw =
+          localizedValues?.[defaultLocale] ??
+          (Array.isArray(localizedValues)
+            ? localizedValues
+            : typeof localizedValues === "object"
+            ? Object.values(localizedValues)[0]
+            : []);
+
+        return raw || [];
+      };
+
+      const srcLinks = getLinksForSide(sourceLocale) || [];
+      const tgtLinks = getLinksForSide(targetLocale) || [];
+
+      const srcIds = srcLinks.map((l) => l?.sys?.id).filter(Boolean);
+      const tgtIds = tgtLinks.map((l) => l?.sys?.id).filter(Boolean);
+
+      if (srcIds.length === 0 && tgtIds.length === 0) {
+        tree[fieldId] = {
+          type: "field",
+          source: "",
+          target: "(empty)",
+        };
+        continue;
+      }
+
+      const allIds = Array.from(new Set([...srcIds, ...tgtIds]));
+      const listChildren = {};
+
+      for (const linkedId of allIds) {
+        if (!linkedId) continue;
+
+        let referencedEntry = cache[linkedId];
+        if (!referencedEntry) {
+          referencedEntry = await callCMA(() =>
+            cma.entry.get({
+              entryId: linkedId,
+              environmentId: envId,
+              spaceId,
+            })
+          );
+          cache[linkedId] = referencedEntry;
+        }
+
+        const childTree = await buildDiffTree({
+          entry: referencedEntry,
+          cma,
+          sourceLocale,
+          targetLocale,
+          defaultLocale,
+          cache,
+          ctCache,
+          assetCache,
+        });
+
+        listChildren[linkedId] = {
+          type: "reference",
+          id: linkedId,
+          linkEntryId: linkedId,
+          children: childTree,
+        };
+      }
+
+      tree[fieldId] = {
+        type: "reference-list",
+        children: listChildren,
+      };
+
+      continue;
+    }
+
+    // -----------------------------
+    // 1b) ASSET / IMAGE FIELDS
+    // -----------------------------
+    if (isAssetLink) {
+      const getLinkForSide = (wantedLocale) => {
+        if (def.localized) {
+          return localizedValues?.[wantedLocale] ?? null;
+        }
+        return (
+          localizedValues?.[defaultLocale] ??
+          (typeof localizedValues === "object"
+            ? Object.values(localizedValues)[0]
+            : null) ??
+          null
+        );
+      };
+
+      const srcLink = getLinkForSide(sourceLocale);
+      const tgtLink = getLinkForSide(targetLocale);
+
+      const srcId = srcLink?.sys?.id || null;
+      const tgtId = tgtLink?.sys?.id || null;
+
+      // Helper: fetch asset with caching
+      const getAsset = async (id) => {
+        if (!id) return null;
+        if (assetCache[id]) return assetCache[id];
+        const asset = await callCMA(() =>
+          cma.asset.get({
+            assetId: id,
+            environmentId: envId,
+            spaceId,
+          })
+        );
+        assetCache[id] = asset;
+        return asset;
+      };
+
+      const [srcAsset, tgtAsset] = await Promise.all([
+        getAsset(srcId),
+        getAsset(tgtId),
+      ]);
+
+      const getImageUrl = (asset, locale) => {
+        if (!asset?.fields?.file) return null;
+        const fileField = asset.fields.file;
+
+        const file =
+          fileField[locale] ||
+          fileField[defaultLocale] ||
+          (typeof fileField === "object" ? Object.values(fileField)[0] : null);
+
+        const url = file?.url;
+        if (!url) return null;
+        return url.startsWith("http") ? url : `https:${url}`;
+      };
+
+      tree[fieldId] = {
+        type: "field",
+        source: srcId || "",
+        target: tgtId || "(empty)",
+        isImage: true,
+        sourceImageUrl: getImageUrl(srcAsset, sourceLocale),
+        targetImageUrl: getImageUrl(tgtAsset, targetLocale),
+      };
+
       continue;
     }
 
