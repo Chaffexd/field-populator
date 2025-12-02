@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { diff_match_patch } from "diff-match-patch";
+import { Pill, Stack } from "@contentful/f36-components";
 
 const dmp = new diff_match_patch();
 
@@ -10,47 +11,408 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;");
 }
 
-/**
- * LEFT (Source): highlight what's in Source but NOT in Target.
- * That's op === -1 (DELETE segments) when diff = diff_main(source, target).
- * We render those as GREEN inserts on the source side.
- */
+/* -------------------------------------------------------------------------- */
+/*                            🔥 ADDED — pill utils                           */
+/* -------------------------------------------------------------------------- */
+
+function extractFrontendTags(raw) {
+  if (!raw) return [];
+
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  return Object.values(json)
+    .filter((v) => Array.isArray(v))
+    .flat()
+    .filter((item) => item && item.title);
+}
+
+function pillVariant(tag, sourceTags, targetTags) {
+  const inSource = sourceTags.some((t) => t.id === tag.id);
+  const inTarget = targetTags.some((t) => t.id === tag.id);
+
+  if (inSource && !inTarget) return "positive"; // green
+  if (!inSource && inTarget) return "negative"; // red
+  return "secondary"; // unchanged
+}
+
+/* -------------------------------------------------------------------------- */
+/*                      🔥 ADDED — custom frontendTags renderer               */
+/* -------------------------------------------------------------------------- */
+
+function FrontendTagsRenderer({
+  fieldKey,
+  node,
+  level,
+  spaceId,
+  environmentId,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const sourceTags = extractFrontendTags(node.source);
+  const targetTags = extractFrontendTags(node.target);
+
+  const fieldUrl =
+    spaceId && environmentId && entryId
+      ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(
+          fieldKey
+        )}`
+      : null;
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const checked = adoptAll ? true : explicitlySelected;
+
+  return (
+    <div
+      key={fieldKey}
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor:
+          JSON.stringify(node.source) !== JSON.stringify(node.target)
+            ? "#fffef8"
+            : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+          gap: 12,
+        }}
+      >
+        <strong>
+          {fieldUrl ? (
+            <a href={fieldUrl} target="_blank" rel="noopener noreferrer">
+              {fieldKey}
+            </a>
+          ) : (
+            fieldKey
+          )}
+        </strong>
+
+        <label
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            fontSize: 12,
+            color: "#444",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+          />
+          {checked ? "Adopt this field" : "Do not adopt this field"}
+        </label>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        {/* Source */}
+        <div style={{ flex: 1 }}>
+          <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
+            Source
+          </em>
+
+          {sourceTags.length === 0 ? (
+            <div style={{ padding: 8, fontFamily: "monospace" }}>(empty)</div>
+          ) : (
+            <Stack flexDirection="row" flexWrap="wrap" gap="spacingXs">
+              {sourceTags.map((t) => (
+                <Pill
+                  key={t.id}
+                  label={t.title}
+                  variant={pillVariant(t, sourceTags, targetTags)}
+                />
+              ))}
+            </Stack>
+          )}
+        </div>
+
+        {/* Target */}
+        <div style={{ flex: 1 }}>
+          <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
+            Target
+          </em>
+
+          {targetTags.length === 0 ? (
+            <div style={{ padding: 8, fontFamily: "monospace" }}>(empty)</div>
+          ) : (
+            <Stack flexDirection="row" flexWrap="wrap" gap="spacingXs">
+              {targetTags.map((t) => (
+                <Pill
+                  key={t.id}
+                  label={t.title}
+                  variant={pillVariant(t, sourceTags, targetTags)}
+                />
+              ))}
+            </Stack>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*          🔥 ADDED — helpers & renderer for relatedProductportfolio         */
+/* -------------------------------------------------------------------------- */
+
+function extractRelatedProducts(raw) {
+  if (!raw) return [];
+
+  let value = raw;
+
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(value)) return [];
+
+  return value.filter((item) => item && item.id);
+}
+
+function relatedCardVariant(entry, sourceEntries, targetEntries) {
+  const inSource = sourceEntries.some((e) => e.id === entry.id);
+  const inTarget = targetEntries.some((e) => e.id === entry.id);
+
+  if (inSource && !inTarget) return "positive";
+  if (!inSource && inTarget) return "negative";
+  return "secondary";
+}
+
+function RelatedProductPortfolioRenderer({
+  fieldKey,
+  node,
+  level,
+  spaceId,
+  environmentId,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const sourceEntries = extractRelatedProducts(node.source);
+  const targetEntries = extractRelatedProducts(node.target);
+
+  const fieldUrl =
+    spaceId && environmentId && entryId
+      ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(
+          fieldKey
+        )}`
+      : null;
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const checked = adoptAll ? true : explicitlySelected;
+
+  const renderEntryCard = (entry, variant) => {
+    const thumbnailUrl = entry.navigationThumbnail?.assetUrl;
+    const slug = entry.slug || "(no slug)";
+    const type = entry.type || "";
+    const altText =
+      entry.navigationThumbnail?.altText || slug || "Related product";
+
+    let backgroundColor = "#f6f6f6";
+    let borderColor = "#ddd";
+
+    if (variant === "positive") {
+      backgroundColor = "#e6ffed";
+      borderColor = "#2c974b";
+    } else if (variant === "negative") {
+      backgroundColor = "#ffeef0";
+      borderColor = "#d73a49";
+    }
+
+    return (
+      <div
+        key={entry.id}
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          padding: 8,
+          borderRadius: 6,
+          border: `1px solid ${borderColor}`,
+          backgroundColor,
+          marginBottom: 8,
+        }}
+      >
+        {thumbnailUrl && (
+          <img
+            src={thumbnailUrl}
+            alt={altText}
+            style={{
+              width: 64,
+              height: 48,
+              objectFit: "cover",
+              borderRadius: 4,
+              flexShrink: 0,
+            }}
+          />
+        )}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 600,
+              fontSize: 14,
+              wordBreak: "break-all",
+            }}
+          >
+            {slug}
+          </div>
+          {type && (
+            <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
+              {type}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const hasChanged =
+    JSON.stringify(sourceEntries) !== JSON.stringify(targetEntries);
+
+  return (
+    <div
+      key={fieldKey}
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor: hasChanged ? "#fffef8" : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+          gap: 12,
+        }}
+      >
+        <strong>
+          {fieldUrl ? (
+            <a href={fieldUrl} target="_blank" rel="noopener noreferrer">
+              {fieldKey}
+            </a>
+          ) : (
+            fieldKey
+          )}
+        </strong>
+
+        <label
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            fontSize: 12,
+            color: "#444",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+          />
+          {checked ? "Adopt this field" : "Do not adopt this field"}
+        </label>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
+            Source
+          </em>
+          {sourceEntries.length === 0 ? (
+            <div style={{ padding: 8, fontFamily: "monospace" }}>(empty)</div>
+          ) : (
+            sourceEntries.map((entry) =>
+              renderEntryCard(
+                entry,
+                relatedCardVariant(entry, sourceEntries, targetEntries)
+              )
+            )
+          )}
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
+            Target
+          </em>
+          {targetEntries.length === 0 ? (
+            <div style={{ padding: 8, fontFamily: "monospace" }}>(empty)</div>
+          ) : (
+            targetEntries.map((entry) =>
+              renderEntryCard(
+                entry,
+                relatedCardVariant(entry, sourceEntries, targetEntries)
+              )
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             ORIGINAL BELOW                                 */
+/* -------------------------------------------------------------------------- */
+
 function renderDiffHtmlSourceGreen(source = "", target = "") {
   const diffs = dmp.diff_main(source, target);
   dmp.diff_cleanupSemantic(diffs);
 
   return diffs
     .map(([op, text]) => {
-      if (op === 0) return `<span>${escapeHtml(text)}</span>`; // equal
+      if (op === 0) return `<span>${escapeHtml(text)}</span>`;
       if (op === -1) {
-        // present in Source, missing in Target → show as green on Source
         return `<ins style="background:#e6ffed;text-decoration:none;">${escapeHtml(
           text
         )}</ins>`;
       }
-      // op === 1 (insert in target) → hide on Source side
       return "";
     })
     .join("");
 }
 
-/**
- * RIGHT (Target): highlight what's in Target but NOT in Source.
- * That's op === 1 (INSERT segments) when diff = diff_main(source, target).
- * We render those as RED on the target side.
- */
 function renderDiffHtmlTargetRed(source = "", target = "") {
   const diffs = dmp.diff_main(source, target);
   dmp.diff_cleanupSemantic(diffs);
 
   return diffs
     .map(([op, text]) => {
-      if (op === 0) return `<span>${escapeHtml(text)}</span>`; // equal
+      if (op === 0) return `<span>${escapeHtml(text)}</span>`;
       if (op === 1) {
-        // present in Target, missing in Source → show as red on Target
         return `<del style="background:#ffeef0;">${escapeHtml(text)}</del>`;
       }
-      // op === -1 (delete from source) → hide on Target side
       return "";
     })
     .join("");
@@ -73,14 +435,6 @@ function buildFieldUrl({ spaceId, environmentId, entryId, fieldKey }) {
   )}`;
 }
 
-/**
- * Try to parse an "asset JSON" value of the shape:
- * {
- *   "altText": "...",
- *   "assetUrl": "https://...",
- *   ...
- * }
- */
 function parseAssetFromString(value) {
   if (!value || typeof value !== "string") return null;
 
@@ -100,34 +454,77 @@ function parseAssetFromString(value) {
         };
       }
     }
-  } catch {
-    // Not JSON or not in expected shape – ignore
-  }
+  } catch {}
 
   return null;
 }
 
-/**
- * Recursive node renderer
- * - field nodes: left=green source-only, right=red target-only
- * - reference nodes: collapsible; children link to the referenced entry's fields
- * - reference-list nodes: wrapper for arrays of entry references
- * - adds a checkbox to adopt this field (granular control)
- */
 function NodeRenderer({
   fieldKey,
   node,
   level = 0,
   spaceId,
   environmentId,
-  entryId, // the entry id whose fields we're linking to at this level
+  entryId,
   selected,
   onToggleField,
   adoptAll,
 }) {
   const indentStyle = { marginLeft: `${level * 20}px` };
 
-  // ---------------- FIELD NODE ----------------
+  /* ---------------------------------------------------------------------- */
+  /* 🔥 HIDE THESE FIELDS COMPLETELY (VISUALLY ONLY)                        */
+  /* ---------------------------------------------------------------------- */
+  const hiddenFields = new Set([
+    "poolpartyTagIDs",
+    "LocaleValidation",
+    "localeValidation",
+    "globaltolocal",
+  ]);
+  if (hiddenFields.has(fieldKey)) {
+    return null;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* 🔥 CUSTOM RENDERERS                                                    */
+  /* ---------------------------------------------------------------------- */
+
+  if (node.type === "field" && fieldKey === "relatedProductportfolio") {
+    return (
+      <RelatedProductPortfolioRenderer
+        fieldKey={fieldKey}
+        node={node}
+        level={level}
+        spaceId={spaceId}
+        environmentId={environmentId}
+        entryId={entryId}
+        selected={selected}
+        onToggleField={onToggleField}
+        adoptAll={adoptAll}
+      />
+    );
+  }
+
+  if (node.type === "field" && fieldKey === "frontendTags") {
+    return (
+      <FrontendTagsRenderer
+        fieldKey={fieldKey}
+        node={node}
+        level={level}
+        spaceId={spaceId}
+        environmentId={environmentId}
+        entryId={entryId}
+        selected={selected}
+        onToggleField={onToggleField}
+        adoptAll={adoptAll}
+      />
+    );
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* ORIGINAL FIELD NODE                                                    */
+  /* ---------------------------------------------------------------------- */
+
   if (node.type === "field") {
     const changed = node.source !== node.target;
     const fieldUrl = buildFieldUrl({
@@ -143,9 +540,6 @@ function NodeRenderer({
     );
     const checked = adoptAll ? true : explicitlySelected;
 
-    // Image support:
-    // 1) explicit isImage from buildDiffTree (asset links)
-    // 2) inferred from JSON (assetUrl)
     const sourceAsset = parseAssetFromString(node.source);
     const targetAsset = parseAssetFromString(node.target);
     const hasJsonImage = Boolean(sourceAsset || targetAsset);
@@ -160,6 +554,7 @@ function NodeRenderer({
       hasAssetLinkImage && node.targetImageUrl
         ? node.targetImageUrl
         : targetAsset?.url;
+
     const sourceAlt =
       (hasAssetLinkImage ? fieldKey : sourceAsset?.alt) || fieldKey;
     const targetAlt =
@@ -217,7 +612,7 @@ function NodeRenderer({
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>
-          {/* LEFT = SOURCE (green for Source-only segments) */}
+          {/* LEFT = SOURCE */}
           <div style={{ flex: 1 }}>
             <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
               Source
@@ -257,7 +652,7 @@ function NodeRenderer({
             )}
           </div>
 
-          {/* RIGHT = TARGET (red for Target-only segments) */}
+          {/* RIGHT = TARGET */}
           <div style={{ flex: 1 }}>
             <em style={{ display: "block", marginBottom: 4, color: "#666" }}>
               Target
@@ -298,7 +693,6 @@ function NodeRenderer({
     );
   }
 
-  // ---------------- REFERENCE-LIST NODE (Array of entry links) ----------------
   if (node.type === "reference-list") {
     return (
       <div style={{ ...indentStyle, marginBottom: 10 }}>
@@ -325,7 +719,6 @@ function NodeRenderer({
     );
   }
 
-  // ---------------- SINGLE REFERENCE NODE ----------------
   if (node.type === "reference") {
     return (
       <CollapsibleReference
@@ -335,7 +728,6 @@ function NodeRenderer({
         level={level}
         spaceId={spaceId}
         environmentId={environmentId}
-        // children should link to the referenced entry’s fields
         entryId={node.linkEntryId || node.id}
         selected={selected}
         onToggleField={onToggleField}
@@ -353,7 +745,7 @@ function CollapsibleReference({
   level,
   spaceId,
   environmentId,
-  entryId, // for children inside this reference
+  entryId,
   selected,
   onToggleField,
   adoptAll,
@@ -397,7 +789,7 @@ function CollapsibleReference({
               level={level + 1}
               spaceId={spaceId}
               environmentId={environmentId}
-              entryId={entryId} // referenced entry id for child field links
+              entryId={entryId}
               selected={selected}
               onToggleField={onToggleField}
               adoptAll={adoptAll}

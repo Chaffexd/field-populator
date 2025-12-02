@@ -267,15 +267,23 @@ export async function buildDiffTree({
     // -----------------------------
     // 2) NON-REFERENCE FIELDS
     // -----------------------------
-    if (!def.localized) {
-      // Skip non-localized scalar fields entirely
-      continue;
+    let sourceVal;
+    let targetVal;
+
+    if (def.localized) {
+      sourceVal = localizedValues?.[sourceLocale] ?? null;
+      targetVal = localizedValues?.[targetLocale] ?? null;
+    } else {
+      // For non-localized fields → ALWAYS include
+      sourceVal =
+        localizedValues?.[defaultLocale] ??
+        (typeof localizedValues === "object"
+          ? Object.values(localizedValues)[0]
+          : null);
+
+      targetVal = sourceVal; // non-localized fields same across locales
     }
 
-    const sourceVal = localizedValues?.[sourceLocale] ?? null;
-    const targetVal = localizedValues?.[targetLocale] ?? null;
-
-    // Normalize for display
     tree[fieldId] = {
       type: "field",
       source: sourceVal == null ? "" : stringifyFieldValue(sourceVal),
