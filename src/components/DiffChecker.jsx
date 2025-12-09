@@ -383,6 +383,186 @@ function RelatedProductPortfolioRenderer({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                          🔥 NEW — extractMainImageAsset                    */
+/* -------------------------------------------------------------------------- */
+function extractMainImageAsset(raw) {
+  if (!raw) return null;
+
+  let value = raw;
+
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!value || typeof value !== "object") return null;
+
+  const url =
+    value.assetUrlCoverImg ||
+    value.assetUrl ||
+    value.targetUrl ||
+    value.tabletRendition ||
+    value.mobileRenditionSm ||
+    value.mobileRenditionXs ||
+    "";
+
+  return {
+    url: url || "",
+    alt: value.altText || "",
+    type: value.assetType || "",
+    youtubeID: value.youtubeID || "",
+    name: value.assetNameCoverImg || value.assetName || "",
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          🔥 NEW — MainImageAssetRenderer                   */
+/* -------------------------------------------------------------------------- */
+function MainImageAssetRenderer({
+  fieldKey,
+  node,
+  level,
+  spaceId,
+  environmentId,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const source = extractMainImageAsset(node.source);
+  const target = extractMainImageAsset(node.target);
+
+  const fieldUrl =
+    spaceId && environmentId && entryId
+      ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(
+          fieldKey
+        )}`
+      : null;
+
+  const changed = JSON.stringify(source) !== JSON.stringify(target);
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const checked = adoptAll ? true : explicitlySelected;
+
+  const renderCard = (asset) => {
+    if (!asset || !asset.url) {
+      return <div style={fieldBoxStyle}>(empty)</div>;
+    }
+
+    return (
+      <div
+        style={{
+          ...fieldBoxStyle,
+          textAlign: "center",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        {asset.youtubeID ? (
+          <div
+            style={{
+              background: "#000",
+              color: "#fff",
+              padding: 8,
+              borderRadius: 4,
+            }}
+          >
+            🎥 Video (YouTube ID: {asset.youtubeID})
+          </div>
+        ) : (
+          <img
+            src={asset.url}
+            alt={asset.alt}
+            style={{
+              maxWidth: "100%",
+              maxHeight: 200,
+              objectFit: "contain",
+              borderRadius: 4,
+            }}
+          />
+        )}
+
+        {asset.alt && (
+          <div style={{ fontSize: 12, color: "#666" }}>
+            <strong>Alt:</strong> {asset.alt}
+          </div>
+        )}
+
+        {asset.name && (
+          <div style={{ fontSize: 12, color: "#666" }}>
+            <strong>Name:</strong> {asset.name}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      key={fieldKey}
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor: changed ? "#fffef8" : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 8,
+        }}
+      >
+        <strong>
+          {fieldUrl ? (
+            <a href={fieldUrl} target="_blank" rel="noopener noreferrer">
+              {fieldKey}
+            </a>
+          ) : (
+            fieldKey
+          )}
+        </strong>
+
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+          />
+          {checked ? "Adopt this field" : "Do not adopt this field"}
+        </label>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+            Source
+          </em>
+          {renderCard(source)}
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+            Target
+          </em>
+          {renderCard(target)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                             ORIGINAL BELOW                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -508,6 +688,25 @@ function NodeRenderer({
   if (node.type === "field" && fieldKey === "frontendTags") {
     return (
       <FrontendTagsRenderer
+        fieldKey={fieldKey}
+        node={node}
+        level={level}
+        spaceId={spaceId}
+        environmentId={environmentId}
+        entryId={entryId}
+        selected={selected}
+        onToggleField={onToggleField}
+        adoptAll={adoptAll}
+      />
+    );
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* 🔥 NEW — CUSTOM RENDERER FOR mainImageasset                                */
+  /* -------------------------------------------------------------------------- */
+  if (node.type === "field" && fieldKey === "mainImageasset") {
+    return (
+      <MainImageAssetRenderer
         fieldKey={fieldKey}
         node={node}
         level={level}
