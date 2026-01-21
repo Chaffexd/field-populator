@@ -7,11 +7,50 @@ export async function buildDiffTree({
   targetLocale,
   defaultLocale,
   cache,
+  visited = new Set(),
+
+  // ✅ NEW safety controls
+  depth = 0,
+  maxDepth = 4, // tune: 3–5 is usually plenty for UI
+  maxNodes = 250, // tune: hard cap across the whole traversal
+
   ctCache = {},
   assetCache = {},
 }) {
   const tree = {};
   if (!entry?.fields) return tree;
+
+  const entryId = entry.sys.id;
+
+  // ✅ HARD STOP: too many nodes expanded already
+  if (visited.size >= maxNodes) {
+    return {
+      type: "circular",
+      entryId,
+      message: "Traversal limit reached – tree truncated",
+    };
+  }
+
+  // ✅ HARD STOP: too deep
+  if (depth >= maxDepth) {
+    return {
+      type: "circular",
+      entryId,
+      message: "Max depth reached – traversal stopped",
+    };
+  }
+
+  // ✅ Stop re-expanding entries (prevents massive DAG explosion)
+  // (This used to be “circular”; now it also means “already expanded somewhere else”.)
+  if (visited.has(entryId)) {
+    return {
+      type: "circular",
+      entryId,
+      message: "Already expanded – traversal stopped",
+    };
+  }
+
+  visited.add(entryId);
 
   const envId = entry.sys.environment.sys.id;
   const spaceId = entry.sys.space.sys.id;
@@ -49,12 +88,10 @@ export async function buildDiffTree({
     // 1) SINGLE ENTRY REFERENCE FIELDS
     // -----------------------------
     if (isEntryRef) {
-      // Helper: get the link value for a side
       const getLinkForSide = (wantedLocale) => {
         if (def.localized) {
           return localizedValues?.[wantedLocale] ?? null;
         }
-        // not localized → use default or first available
         return (
           localizedValues?.[defaultLocale] ??
           (typeof localizedValues === "object"
@@ -71,17 +108,30 @@ export async function buildDiffTree({
       const tgtId = tgtLink?.sys?.id || null;
 
       if (!srcId && !tgtId) {
-        // no reference on either side
+        tree[fieldId] = { type: "field", source: "", target: "(empty)" };
+        continue;
+      }
+
+      const chosenId = srcId || tgtId;
+
+      // ✅ If we’ve already expanded this entry elsewhere, don’t expand again
+      if (visited.has(chosenId)) {
         tree[fieldId] = {
-          type: "field",
-          source: "",
-          target: "(empty)",
+          type: "reference",
+          id:
+            srcId && tgtId && srcId !== tgtId
+              ? `${srcId} → ${tgtId}`
+              : chosenId,
+          linkEntryId: chosenId,
+          children: {
+            type: "circular",
+            entryId: chosenId,
+            message: "Already expanded – traversal stopped",
+          },
         };
         continue;
       }
 
-      // Use one id to traverse, prefer source
-      const chosenId = srcId || tgtId;
       let referencedEntry = cache[chosenId];
       if (!referencedEntry) {
         referencedEntry = await callCMA(() =>
@@ -101,6 +151,10 @@ export async function buildDiffTree({
         targetLocale,
         defaultLocale,
         cache,
+        visited,
+        depth: depth + 1,
+        maxDepth,
+        maxNodes,
         ctCache,
         assetCache,
       });
@@ -109,14 +163,14 @@ export async function buildDiffTree({
         type: "reference",
         id:
           srcId && tgtId && srcId !== tgtId ? `${srcId} → ${tgtId}` : chosenId,
-        linkEntryId: chosenId, // for deep-linking and selection
+        linkEntryId: chosenId,
         children,
       };
       continue;
     }
 
     // -----------------------------
-    // 1a) MULTI ENTRY REFERENCE (ARRAY OF LINKS) – NEW
+    // 1a) MULTI ENTRY REFERENCE (ARRAY OF LINKS)
     // -----------------------------
     if (isEntryArrayRef) {
       const getLinksForSide = (wantedLocale) => {
@@ -142,11 +196,7 @@ export async function buildDiffTree({
       const tgtIds = tgtLinks.map((l) => l?.sys?.id).filter(Boolean);
 
       if (srcIds.length === 0 && tgtIds.length === 0) {
-        tree[fieldId] = {
-          type: "field",
-          source: "",
-          target: "(empty)",
-        };
+        tree[fieldId] = { type: "field", source: "", target: "(empty)" };
         continue;
       }
 
@@ -155,6 +205,31 @@ export async function buildDiffTree({
 
       for (const linkedId of allIds) {
         if (!linkedId) continue;
+
+        // ✅ Stop if we hit node budget mid-list
+        if (visited.size >= maxNodes) {
+          listChildren[linkedId] = {
+            type: "circular",
+            entryId: linkedId,
+            message: "Traversal limit reached – list truncated",
+          };
+          continue;
+        }
+
+        // ✅ Don’t expand the same entry twice
+        if (visited.has(linkedId)) {
+          listChildren[linkedId] = {
+            type: "reference",
+            id: linkedId,
+            linkEntryId: linkedId,
+            children: {
+              type: "circular",
+              entryId: linkedId,
+              message: "Already expanded – traversal stopped",
+            },
+          };
+          continue;
+        }
 
         let referencedEntry = cache[linkedId];
         if (!referencedEntry) {
@@ -175,6 +250,10 @@ export async function buildDiffTree({
           targetLocale,
           defaultLocale,
           cache,
+          visited,
+          depth: depth + 1,
+          maxDepth,
+          maxNodes,
           ctCache,
           assetCache,
         });
@@ -218,7 +297,6 @@ export async function buildDiffTree({
       const srcId = srcLink?.sys?.id || null;
       const tgtId = tgtLink?.sys?.id || null;
 
-      // Helper: fetch asset with caching
       const getAsset = async (id) => {
         if (!id) return null;
         if (assetCache[id]) return assetCache[id];
@@ -274,14 +352,13 @@ export async function buildDiffTree({
       sourceVal = localizedValues?.[sourceLocale] ?? null;
       targetVal = localizedValues?.[targetLocale] ?? null;
     } else {
-      // For non-localized fields → ALWAYS include
       sourceVal =
         localizedValues?.[defaultLocale] ??
         (typeof localizedValues === "object"
           ? Object.values(localizedValues)[0]
           : null);
 
-      targetVal = sourceVal; // non-localized fields same across locales
+      targetVal = sourceVal;
     }
 
     tree[fieldId] = {
@@ -294,17 +371,51 @@ export async function buildDiffTree({
   return tree;
 }
 
-/** Converts various field types to string for diffing */
-function stringifyFieldValue(value) {
-  if (typeof value === "string") return value;
-  if (value?.nodeType === "document") {
-    return extractPlainTextFromRichText(value);
-  }
+function safeStringify(value, maxLength = 5000) {
+  const seen = new WeakSet();
+
   try {
-    return JSON.stringify(value, null, 2);
+    const str = JSON.stringify(
+      value,
+      (key, val) => {
+        if (typeof val === "object" && val !== null) {
+          if (seen.has(val)) return "[Circular]";
+          seen.add(val);
+        }
+
+        // Strip huge Contentful sys blobs
+        if (key === "sys") {
+          return {
+            id: val.id,
+            type: val.type,
+            linkType: val.linkType,
+          };
+        }
+
+        return val;
+      },
+      2
+    );
+
+    if (str.length > maxLength) {
+      return str.slice(0, maxLength) + "\n…(truncated)";
+    }
+
+    return str;
   } catch {
     return String(value);
   }
+}
+
+/** Converts various field types to string for diffing */
+function stringifyFieldValue(value) {
+  if (typeof value === "string") return value;
+
+  if (value?.nodeType === "document") {
+    return extractPlainTextFromRichText(value);
+  }
+
+  return safeStringify(value);
 }
 
 /** Extract plain text from a Rich Text document */

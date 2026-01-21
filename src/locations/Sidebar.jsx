@@ -10,7 +10,7 @@ const Sidebar = () => {
 
   const openDialog = () => {
     sdk.dialogs.openCurrent({
-      title: "Master Language Adopter",
+      title: "Locale Populator",
       width: "1200px",
       minHeight: "600px",
       parameters: {

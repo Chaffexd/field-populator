@@ -918,6 +918,14 @@ function NodeRenderer({
     );
   }
 
+  if (node.type === "circular") {
+    return (
+      <div style={{ color: "#c00", fontStyle: "italic" }}>
+        🔁 Circular reference detected – traversal stopped
+      </div>
+    );
+  }
+
   if (node.type === "reference") {
     return (
       <CollapsibleReference
@@ -951,7 +959,7 @@ function CollapsibleReference({
 }) {
   const [expanded, setExpanded] = useState(false);
   const indentStyle = { marginLeft: `${level * 20}px` };
-  const childCount = Object.keys(node.children).length;
+  const childCount = Object.keys(node.children || {}).length;
 
   return (
     <div key={fieldKey} style={{ ...indentStyle, marginBottom: 10 }}>

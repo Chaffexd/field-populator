@@ -48,5 +48,6 @@
     "vite": "^6.2.2",
     "vitest": "^3.0.9"
   },
-  "homepage": "."
+  "homepage": ".",
+  "type": "module"
 }

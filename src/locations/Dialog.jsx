@@ -46,8 +46,12 @@ function collectFields(tree, rootEntryId) {
   const walk = (nodeMap, currentEntryId) => {
     if (!nodeMap) return;
 
+    // 🚨 Stop on circular node
+    if (nodeMap.type === "circular") return;
+
     Object.entries(nodeMap).forEach(([key, node]) => {
       if (!node) return;
+      if (node.type === "circular") return;
 
       if (node.type === "field") {
         result.push({ entryId: currentEntryId, fieldId: key });
@@ -57,11 +61,13 @@ function collectFields(tree, rootEntryId) {
           walk(node.children, childEntryId);
         }
       } else if (node.type === "reference-list") {
-        // Array of references: walk each referenced entry's children
         Object.values(node.children || {}).forEach((childNode) => {
           if (!childNode) return;
+          if (childNode.type === "circular") return;
+
           const childEntryId =
             childNode.linkEntryId || childNode.id || currentEntryId;
+
           if (childNode.children) {
             walk(childNode.children, childEntryId);
           }
@@ -144,6 +150,9 @@ const Dialog = () => {
           targetLocale,
           defaultLocale: locales.find((l) => l.default)?.code,
           cache: {},
+          visited: new Set(),
+          maxDepth: 4,
+          maxNodes: 250,
         });
 
         setDiffData(tree);
@@ -285,9 +294,7 @@ const Dialog = () => {
       setAdoptMsg(
         `Adopted ${totalChangedFields} field${
           totalChangedFields === 1 ? "" : "s"
-        } across ${totalUpdatedEntries} entr${
-          totalUpdatedEntries === 1 ? "y" : "ies"
-        } (${targets.join(", ")}).`
+        } across ${totalUpdatedEntries} entries (${targets.join(", ")}).`
       );
 
       // Refresh diff
@@ -305,6 +312,7 @@ const Dialog = () => {
           targetLocale,
           defaultLocale,
           cache: {},
+          visited: new Set(),
         });
 
         setDiffData(tree);
@@ -314,7 +322,10 @@ const Dialog = () => {
       setAdoptStatus("success");
     } catch (err) {
       console.error(err);
-      setAdoptMsg("Failed to adopt changes.");
+      setAdoptMsg(
+        { code: err.code, message: err.message } ||
+          "Adoption failed, please double check validation rules."
+      );
       setAdoptStatus("error");
     } finally {
       setAdopting(false);
@@ -417,7 +428,10 @@ const Dialog = () => {
 
       {error && (
         <div style={{ margin: 20 }}>
-          <Note variant="negative" title="Unable to compare">
+          <Note
+            variant="negative"
+            title="Unable to compare - please ensure all references are accessible."
+          >
             {error}
           </Note>
         </div>
@@ -496,7 +510,7 @@ const Dialog = () => {
                   >
                     Adopt Source → Target
                   </Button>
-                  {adoptMsg && <span>{adoptMsg}</span>}
+                  {adoptMsg && <span>{JSON.stringify(adoptMsg)}</span>}
                 </div>
               </div>
             </Note>
