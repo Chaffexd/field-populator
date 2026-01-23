@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { diff_match_patch } from "diff-match-patch";
-import { Pill, Stack } from "@contentful/f36-components";
+import { Pill, Stack, EntryCard } from "@contentful/f36-components";
 
 const dmp = new diff_match_patch();
 
@@ -9,6 +9,23 @@ function escapeHtml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function getRelatedEntryCardText(entry) {
+  const isTemplate =
+    typeof entry.type === "string" &&
+    entry.type.toLowerCase().startsWith("template");
+
+  const baseTitle =
+    entry.navigationTitle ||
+    entry.slug ||
+    `${entry.type || "Item"} – ${entry.id}`;
+
+  const title = isTemplate ? `Template – ${baseTitle}` : baseTitle;
+
+  const description = entry.navigationDescription || entry.type || entry.id;
+
+  return { title, description };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -228,68 +245,21 @@ function RelatedProductPortfolioRenderer({
   const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
   const checked = adoptAll ? true : explicitlySelected;
 
-  const renderEntryCard = (entry, variant) => {
-    const thumbnailUrl = entry.navigationThumbnail?.assetUrl;
-    const slug = entry.slug || "(no slug)";
-    const type = entry.type || "";
-    const altText =
-      entry.navigationThumbnail?.altText || slug || "Related product";
+  const renderEntryCard = (entry) => {
+    const entryUrl =
+      spaceId && environmentId
+        ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entry.id}`
+        : null;
 
-    let backgroundColor = "#f6f6f6";
-    let borderColor = "#ddd";
-
-    if (variant === "positive") {
-      backgroundColor = "#e6ffed";
-      borderColor = "#2c974b";
-    } else if (variant === "negative") {
-      backgroundColor = "#ffeef0";
-      borderColor = "#d73a49";
-    }
+    const { title, description } = getRelatedEntryCardText(entry);
 
     return (
-      <div
+      <EntryCard
         key={entry.id}
-        style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          padding: 8,
-          borderRadius: 6,
-          border: `1px solid ${borderColor}`,
-          backgroundColor,
-          marginBottom: 8,
-        }}
-      >
-        {thumbnailUrl && (
-          <img
-            src={thumbnailUrl}
-            alt={altText}
-            style={{
-              width: 64,
-              height: 48,
-              objectFit: "cover",
-              borderRadius: 4,
-              flexShrink: 0,
-            }}
-          />
-        )}
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontWeight: 600,
-              fontSize: 14,
-              wordBreak: "break-all",
-            }}
-          >
-            {slug}
-          </div>
-          {type && (
-            <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
-              {type}
-            </div>
-          )}
-        </div>
-      </div>
+        title={title}
+        description={description}
+        size="small"
+      />
     );
   };
 
@@ -353,12 +323,7 @@ function RelatedProductPortfolioRenderer({
           {sourceEntries.length === 0 ? (
             <div style={{ padding: 8, fontFamily: "monospace" }}>(empty)</div>
           ) : (
-            sourceEntries.map((entry) =>
-              renderEntryCard(
-                entry,
-                relatedCardVariant(entry, sourceEntries, targetEntries)
-              )
-            )
+            sourceEntries.map((entry) => renderEntryCard(entry))
           )}
         </div>
 
@@ -685,6 +650,39 @@ function NodeRenderer({
     );
   }
 
+  if (node.type === "reference-list" && fieldKey === "curatedStories") {
+    const entries = Object.values(node.children || {}).map((child) => {
+      const typeLabel =
+        child.type === "template"
+          ? "Template – Article"
+          : child.type || "Entry";
+
+      return {
+        id: child.entryId,
+        type: typeLabel,
+        title: child.title,
+        slug: child.slug,
+      };
+    });
+
+    return (
+      <RelatedProductPortfolioRenderer
+        fieldKey={fieldKey}
+        node={{
+          source: entries,
+          target: entries,
+        }}
+        level={level}
+        spaceId={spaceId}
+        environmentId={environmentId}
+        entryId={entryId}
+        selected={selected}
+        onToggleField={onToggleField}
+        adoptAll={adoptAll}
+      />
+    );
+  }
+
   if (node.type === "field" && fieldKey === "frontendTags") {
     return (
       <FrontendTagsRenderer
@@ -717,6 +715,27 @@ function NodeRenderer({
         onToggleField={onToggleField}
         adoptAll={adoptAll}
       />
+    );
+  }
+
+  if (node.type === "template" || node.type === "article") {
+    const entryUrl =
+      spaceId && environmentId && node.entryId
+        ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${node.entryId}`
+        : null;
+
+    return (
+      <div style={{ marginLeft: `${level * 20}px`, marginBottom: 12 }}>
+        <EntryCard
+          title={node.title}
+          description={node.slug}
+          size="small"
+          isDraft
+          onClick={() => {
+            if (entryUrl) window.open(entryUrl, "_blank");
+          }}
+        />
+      </div>
     );
   }
 
@@ -899,20 +918,41 @@ function NodeRenderer({
           {fieldKey}
         </strong>
         <div style={{ display: "grid", gap: 8 }}>
-          {Object.entries(node.children).map(([childEntryId, childNode]) => (
-            <CollapsibleReference
-              key={childEntryId}
-              fieldKey={childEntryId}
-              node={childNode}
-              level={level + 1}
-              spaceId={spaceId}
-              environmentId={environmentId}
-              entryId={childNode.linkEntryId || childEntryId}
-              selected={selected}
-              onToggleField={onToggleField}
-              adoptAll={adoptAll}
-            />
-          ))}
+          {Object.entries(node.children).map(([childEntryId, childNode]) => {
+            // 🧩 If it's a template, render it directly as an EntryCard
+            if (childNode.type === "template") {
+              return (
+                <NodeRenderer
+                  key={childEntryId}
+                  fieldKey={childEntryId}
+                  node={childNode}
+                  level={level + 1}
+                  spaceId={spaceId}
+                  environmentId={environmentId}
+                  entryId={childEntryId}
+                  selected={selected}
+                  onToggleField={onToggleField}
+                  adoptAll={adoptAll}
+                />
+              );
+            }
+
+            // Otherwise it's a normal reference → collapsible
+            return (
+              <CollapsibleReference
+                key={childEntryId}
+                fieldKey={childEntryId}
+                node={childNode}
+                level={level + 1}
+                spaceId={spaceId}
+                environmentId={environmentId}
+                entryId={childNode.linkEntryId || childEntryId}
+                selected={selected}
+                onToggleField={onToggleField}
+                adoptAll={adoptAll}
+              />
+            );
+          })}
         </div>
       </div>
     );

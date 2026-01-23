@@ -143,6 +143,8 @@ const Dialog = () => {
           spaceId,
         });
 
+        console.log("Fetched entry for diff:", entry);
+
         const tree = await buildDiffTree({
           entry,
           cma,

@@ -89,9 +89,7 @@ export async function buildDiffTree({
     // -----------------------------
     if (isEntryRef) {
       const getLinkForSide = (wantedLocale) => {
-        if (def.localized) {
-          return localizedValues?.[wantedLocale] ?? null;
-        }
+        if (def.localized) return localizedValues?.[wantedLocale] ?? null;
         return (
           localizedValues?.[defaultLocale] ??
           (typeof localizedValues === "object"
@@ -114,7 +112,36 @@ export async function buildDiffTree({
 
       const chosenId = srcId || tgtId;
 
-      // ✅ If we’ve already expanded this entry elsewhere, don’t expand again
+      let referencedEntry = cache[chosenId];
+      if (!referencedEntry) {
+        referencedEntry = await callCMA(() =>
+          cma.entry.get({
+            entryId: chosenId,
+            environmentId: envId,
+            spaceId,
+          })
+        );
+        cache[chosenId] = referencedEntry;
+      }
+
+      // 🧩 TEMPLATE SHORT-CIRCUIT
+      if (isTemplateEntry(referencedEntry)) {
+        tree[fieldId] = {
+          type: "template",
+          entryId: chosenId,
+          title:
+            referencedEntry.fields?.title?.[defaultLocale] ||
+            referencedEntry.fields?.title?.[sourceLocale] ||
+            "(no title)",
+          slug:
+            referencedEntry.fields?.slug?.[defaultLocale] ||
+            referencedEntry.fields?.slug?.[sourceLocale] ||
+            "(no slug)",
+        };
+        continue;
+      }
+
+      // Already expanded elsewhere
       if (visited.has(chosenId)) {
         tree[fieldId] = {
           type: "reference",
@@ -130,18 +157,6 @@ export async function buildDiffTree({
           },
         };
         continue;
-      }
-
-      let referencedEntry = cache[chosenId];
-      if (!referencedEntry) {
-        referencedEntry = await callCMA(() =>
-          cma.entry.get({
-            entryId: chosenId,
-            environmentId: envId,
-            spaceId,
-          })
-        );
-        cache[chosenId] = referencedEntry;
       }
 
       const children = await buildDiffTree({
@@ -172,12 +187,12 @@ export async function buildDiffTree({
     // -----------------------------
     // 1a) MULTI ENTRY REFERENCE (ARRAY OF LINKS)
     // -----------------------------
+    // -----------------------------
+    // 1a) MULTI ENTRY REFERENCE (ARRAY OF LINKS)
+    // -----------------------------
     if (isEntryArrayRef) {
       const getLinksForSide = (wantedLocale) => {
-        if (def.localized) {
-          return localizedValues?.[wantedLocale] ?? [];
-        }
-
+        if (def.localized) return localizedValues?.[wantedLocale] ?? [];
         const raw =
           localizedValues?.[defaultLocale] ??
           (Array.isArray(localizedValues)
@@ -185,7 +200,6 @@ export async function buildDiffTree({
             : typeof localizedValues === "object"
             ? Object.values(localizedValues)[0]
             : []);
-
         return raw || [];
       };
 
@@ -206,27 +220,11 @@ export async function buildDiffTree({
       for (const linkedId of allIds) {
         if (!linkedId) continue;
 
-        // ✅ Stop if we hit node budget mid-list
         if (visited.size >= maxNodes) {
           listChildren[linkedId] = {
             type: "circular",
             entryId: linkedId,
             message: "Traversal limit reached – list truncated",
-          };
-          continue;
-        }
-
-        // ✅ Don’t expand the same entry twice
-        if (visited.has(linkedId)) {
-          listChildren[linkedId] = {
-            type: "reference",
-            id: linkedId,
-            linkEntryId: linkedId,
-            children: {
-              type: "circular",
-              entryId: linkedId,
-              message: "Already expanded – traversal stopped",
-            },
           };
           continue;
         }
@@ -241,6 +239,37 @@ export async function buildDiffTree({
             })
           );
           cache[linkedId] = referencedEntry;
+        }
+
+        // 🧩 TEMPLATE SHORT-CIRCUIT
+        if (isTemplateEntry(referencedEntry)) {
+          listChildren[linkedId] = {
+            type: "template",
+            entryId: linkedId,
+            title:
+              referencedEntry.fields?.title?.[defaultLocale] ||
+              referencedEntry.fields?.title?.[sourceLocale] ||
+              "(no title)",
+            slug:
+              referencedEntry.fields?.slug?.[defaultLocale] ||
+              referencedEntry.fields?.slug?.[sourceLocale] ||
+              "(no slug)",
+          };
+          continue;
+        }
+
+        if (visited.has(linkedId)) {
+          listChildren[linkedId] = {
+            type: "reference",
+            id: linkedId,
+            linkEntryId: linkedId,
+            children: {
+              type: "circular",
+              entryId: linkedId,
+              message: "Already expanded – traversal stopped",
+            },
+          };
+          continue;
         }
 
         const childTree = await buildDiffTree({
@@ -270,7 +299,6 @@ export async function buildDiffTree({
         type: "reference-list",
         children: listChildren,
       };
-
       continue;
     }
 
@@ -431,4 +459,9 @@ function extractPlainTextFromRichText(richText) {
     return extractPlainTextFromRichText(richText.content);
   }
   return "";
+}
+
+function isTemplateEntry(entry) {
+  const ct = (entry?.sys?.contentType?.sys?.id || "").toLowerCase();
+  return ct.startsWith("template") || ct === "article";
 }
