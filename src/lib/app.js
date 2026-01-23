@@ -4,7 +4,7 @@ const SPACE_ID = "y44f0yph0jif";
 const ENVIRONMENT_ID = "master"; // change if needed
 
 const client = contentful.createClient({
-  accessToken: "CFPAT-PkmM7WC8vCtvpDLxx_uZrig1B4XzuHUcjN5u_eK4WX0",
+  accessToken: "",
 });
 
 async function countPublishedTemplates() {
