@@ -5,6 +5,122 @@ import { documentToReactComponents } from "@contentful/rich-text-react-renderer"
 
 const dmp = new diff_match_patch();
 
+function extractTags(raw) {
+  if (!raw) return [];
+
+  let value = raw;
+
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!value || typeof value !== "object") return [];
+
+  return [
+    ...(value.productTags || []),
+    ...(value.typeTags || []),
+    ...(value.topicTags || []),
+  ].filter((t) => t && t.id && t.title);
+}
+
+function TagRenderer({
+  fieldKey,
+  node,
+  level,
+  spaceId,
+  environmentId,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const sourceTags = extractTags(node.source);
+  const targetTags = extractTags(node.target);
+
+  const hasChanged = JSON.stringify(sourceTags) !== JSON.stringify(targetTags);
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const checked = adoptAll ? true : explicitlySelected;
+
+  return (
+    <div
+      key={fieldKey}
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor: hasChanged ? "#fffef8" : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <strong>{fieldKey}</strong>
+
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+          />
+          {checked ? "Adopt this field" : "Do not adopt this field"}
+        </label>
+      </div>
+
+      <div style={{ display: "flex", gap: 12 }}>
+        {/* Source */}
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+            Source
+          </em>
+
+          {sourceTags.length === 0 ? (
+            "(empty)"
+          ) : (
+            <Stack flexDirection="row" flexWrap="wrap" gap="spacingXs">
+              {sourceTags.map((tag) => (
+                <Pill key={tag.id} label={tag.title} />
+              ))}
+            </Stack>
+          )}
+        </div>
+
+        {/* Target */}
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+            Target
+          </em>
+
+          {targetTags.length === 0 ? (
+            "(empty)"
+          ) : (
+            <Stack flexDirection="row" flexWrap="wrap" gap="spacingXs">
+              {targetTags.map((tag) => (
+                <Pill key={tag.id} label={tag.title} />
+              ))}
+            </Stack>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -747,6 +863,22 @@ function NodeRenderer({
   /* ---------------------------------------------------------------------- */
   /* 🔥 CUSTOM RENDERERS                                                    */
   /* ---------------------------------------------------------------------- */
+
+  if (node.type === "field" && fieldKey === "tag") {
+    return (
+      <TagRenderer
+        fieldKey={fieldKey}
+        node={node}
+        level={level}
+        spaceId={spaceId}
+        environmentId={environmentId}
+        entryId={entryId}
+        selected={selected}
+        onToggleField={onToggleField}
+        adoptAll={adoptAll}
+      />
+    );
+  }
 
   function normalizeFieldKey(key) {
     return key.replace(/[^a-zA-Z]/g, "").toLowerCase();
