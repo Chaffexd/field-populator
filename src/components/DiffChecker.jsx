@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { diff_match_patch } from "diff-match-patch";
 import { Pill, Stack, EntryCard } from "@contentful/f36-components";
+import { documentToReactComponents } from "@contentful/rich-text-react-renderer";
 
 const dmp = new diff_match_patch();
 
@@ -9,6 +10,115 @@ function escapeHtml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+const JSON_FIELDS = {
+  demonstratedResults: "demonstratedResults",
+  features: "features",
+  imageGallery: "imageGallery",
+  featuredProducts: "featuredProducts",
+  relatedProducts: "relatedProducts",
+};
+
+function parseJsonOnce(raw) {
+  if (!raw || raw === "(empty)") return null;
+  if (typeof raw === "object") return raw;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function DemonstratedResults({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {value.map((item, i) => (
+        <div key={i} style={{ border: "1px solid #eee", padding: 12 }}>
+          {item.statistics && (
+            <strong>{documentToReactComponents(item.statistics)}</strong>
+          )}
+
+          {item.teaser && documentToReactComponents(item.teaser)}
+          {item.summary && documentToReactComponents(item.summary)}
+
+          {item.result?.assetUrl && (
+            <a href={item.result.assetUrl} target="_blank" rel="noreferrer">
+              📎 {item.result.assetName || "Download asset"}
+            </a>
+          )}
+
+          {item.ctaUrl && (
+            <div>
+              👉 <a href={item.ctaUrl}>Read more</a>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Features({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {value.map((f, i) => (
+        <div key={i}>
+          {f.subhead && <h4>{documentToReactComponents(f.subhead)}</h4>}
+
+          {f.text && documentToReactComponents(f.text)}
+
+          {f.heroImage?.assetUrl && (
+            <img
+              src={f.heroImage.assetUrl}
+              alt={f.heroImage.altText}
+              style={{ maxWidth: "100%" }}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ImageGallery({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, 1fr)",
+        gap: 12,
+      }}
+    >
+      {value.map((img, i) => (
+        <figure key={i}>
+          <img src={img.assetUrl} alt={img.altText} />
+          {img.caption && documentToReactComponents(img.caption)}
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function ProductList({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <ul>
+      {value.map((p) => (
+        <li key={p.id}>
+          {p.title} ({p.ctn})
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function getRelatedEntryCardText(entry) {
@@ -554,10 +664,14 @@ function renderDiffHtmlTargetRed(source = "", target = "") {
 
   return diffs
     .map(([op, text]) => {
-      if (op === 0) return `<span>${escapeHtml(text)}</span>`;
-      if (op === 1) {
-        return `<del style="background:#ffeef0;">${escapeHtml(text)}</del>`;
+      if (op === 0) {
+        return `<span>${escapeHtml(text)}</span>`;
       }
+
+      if (op === 1) {
+        return `<span style="background:#ffeef0;">${escapeHtml(text)}</span>`;
+      }
+
       return "";
     })
     .join("");
@@ -633,6 +747,112 @@ function NodeRenderer({
   /* ---------------------------------------------------------------------- */
   /* 🔥 CUSTOM RENDERERS                                                    */
   /* ---------------------------------------------------------------------- */
+
+  function normalizeFieldKey(key) {
+    return key.replace(/[^a-zA-Z]/g, "").toLowerCase();
+  }
+
+  console.log("NODE:", {
+    fieldKey,
+    type: node.type,
+    hasSource: !!node.source,
+    hasChildren: !!node.children,
+  });
+
+  if (JSON_FIELDS[fieldKey]) {
+    const source = parseJsonOnce(node.source) ?? [];
+    const target = parseJsonOnce(node.target) ?? [];
+
+    const render = (value) => {
+      console.log("value =", value);
+      console.log("fieldKey =", fieldKey, "value =", value);
+
+      const normalizedKey = normalizeFieldKey(fieldKey);
+
+      switch (normalizedKey) {
+        case "demonstratedresults":
+          return <DemonstratedResults value={value} />;
+
+        case "features":
+          return <Features value={value} />;
+
+        case "imagegallery":
+          return <ImageGallery value={value} />;
+
+        case "featuredproducts":
+        case "relatedproducts":
+          return <ProductList value={value} />;
+
+        default:
+          return null;
+      }
+    };
+
+    return (
+      <div
+        style={{
+          marginBottom: 15,
+          padding: 10,
+          border: "1px solid #ddd",
+          borderRadius: 6,
+          backgroundColor:
+            JSON.stringify(source) !== JSON.stringify(target)
+              ? "#fffef8"
+              : "#f6f6f6",
+          ...indentStyle,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8,
+            gap: 12,
+          }}
+        >
+          <strong>{fieldKey}</strong>
+
+          <label
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              fontSize: 12,
+              color: "#444",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={adoptAll || selected?.[entryId]?.has(fieldKey)}
+              onChange={(e) =>
+                onToggleField(entryId, fieldKey, e.target.checked)
+              }
+            />
+            {adoptAll || selected?.[entryId]?.has(fieldKey)
+              ? "Adopt this field"
+              : "Do not adopt this field"}
+          </label>
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+              Source
+            </em>
+            {source.length === 0 ? "(empty)" : render(source)}
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+              Target
+            </em>
+            {target.length === 0 ? "(empty)" : render(target)}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (node.type === "field" && fieldKey === "relatedProductportfolio") {
     return (

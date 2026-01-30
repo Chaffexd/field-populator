@@ -11,8 +11,8 @@ const Sidebar = () => {
   const openDialog = () => {
     sdk.dialogs.openCurrent({
       title: "Locale Populator",
-      width: "1200px",
-      minHeight: "600px",
+      width: "1400px",
+      minHeight: "800px",
       parameters: {
         entryId: sdk.ids.entry,
         environmentId: sdk.ids.environment,

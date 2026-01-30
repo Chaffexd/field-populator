@@ -104,6 +104,8 @@ const Dialog = () => {
   const [adopting, setAdopting] = useState(false);
   const [adoptMsg, setAdoptMsg] = useState(null);
   const [adoptSearch, setAdoptSearch] = useState("");
+  const [selectAllLocales, setSelectAllLocales] = useState(false);
+  const SELECT_ALL_VALUE = "__SELECT_ALL_LOCALES__";
 
   // Invocation
   const params = sdk.parameters.invocation;
@@ -241,11 +243,31 @@ const Dialog = () => {
   const handleSelectAdoptItem = (e) => {
     const { checked, value } = e.target;
 
-    setAdoptTargets((prev) =>
-      checked
+    // 🔥 Special case: Select All
+    if (value === SELECT_ALL_VALUE) {
+      if (checked) {
+        setSelectAllLocales(true);
+        setAdoptTargets(filteredAdoptLocales.map((l) => l.code));
+      } else {
+        setSelectAllLocales(false);
+        setAdoptTargets([]);
+      }
+      return;
+    }
+
+    // Normal locale toggle
+    setAdoptTargets((prev) => {
+      const next = checked
         ? Array.from(new Set([...prev, value]))
-        : prev.filter((v) => v !== value)
-    );
+        : prev.filter((v) => v !== value);
+
+      // Manual change disables select-all
+      if (selectAllLocales) {
+        setSelectAllLocales(false);
+      }
+
+      return next;
+    });
   };
 
   // Adopt changes
@@ -481,6 +503,29 @@ const Dialog = () => {
                     popoverProps={{ isFullWidth: true }}
                     currentSelection={adoptTargets}
                   >
+                    {/* 🔥 Select all option INSIDE the list */}
+                    <Multiselect.Option
+                      key="select-all-locales"
+                      value={SELECT_ALL_VALUE}
+                      label={`Select all eligible locales (${filteredAdoptLocales.length})`}
+                      onSelectItem={handleSelectAdoptItem}
+                      itemId="select-all-locales"
+                      isChecked={
+                        selectAllLocales &&
+                        adoptTargets.length === filteredAdoptLocales.length &&
+                        filteredAdoptLocales.length > 0
+                      }
+                    />
+
+                    {/* Optional visual divider */}
+                    <div
+                      style={{
+                        height: 1,
+                        background: "#e5e5e5",
+                        margin: "6px 0",
+                      }}
+                    />
+
                     {filteredAdoptLocales.map((l, index) => (
                       <Multiselect.Option
                         key={`adopt-${l.sys.id}-${index}`}

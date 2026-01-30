@@ -1,7 +1,7 @@
 import contentful from "contentful-management";
 
 const SPACE_ID = "y44f0yph0jif";
-const ENVIRONMENT_ID = "master"; // change if needed
+const ENVIRONMENT_ID = "acc"; // change if needed
 
 const client = contentful.createClient({
   accessToken: "",

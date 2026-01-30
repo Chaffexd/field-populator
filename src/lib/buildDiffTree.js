@@ -17,6 +17,14 @@ export async function buildDiffTree({
   ctCache = {},
   assetCache = {},
 }) {
+  const JSON_APP_FIELDS = new Set([
+    "demonstratedResults",
+    "features",
+    "imageGallery",
+    "featuredProducts",
+    "relatedProducts",
+  ]);
+
   const tree = {};
   if (!entry?.fields) return tree;
 
@@ -389,6 +397,18 @@ export async function buildDiffTree({
       targetVal = sourceVal;
     }
 
+    // 🔥 Preserve raw JSON for app-managed JSON fields
+    if (JSON_APP_FIELDS.has(fieldId)) {
+      tree[fieldId] = {
+        type: "field",
+        source: sourceVal ?? null,
+        target: targetVal ?? null,
+        isJson: true,
+      };
+      continue;
+    }
+
+    // Default behaviour for normal fields
     tree[fieldId] = {
       type: "field",
       source: sourceVal == null ? "" : stringifyFieldValue(sourceVal),
