@@ -95,6 +95,7 @@ const Dialog = () => {
   const [adoptStatus, setAdoptStatus] = useState("idle");
   const [adoptAll, setAdoptAll] = useState(true);
   const [allFields, setAllFields] = useState([]); // [{ entryId, fieldId }]
+  const [overwriteAll, setOverwriteAll] = useState(false);
 
   // Per-field selections
   const [selected, setSelected] = useState({});
@@ -298,6 +299,8 @@ const Dialog = () => {
         if (tgt === sourceLocale) continue;
         if (!isPairAllowed(sourceLocale, tgt)) continue;
 
+        console.log("Overwrite all:", overwriteAll);
+
         const summary = await adoptEntryTree({
           cma,
           entryId,
@@ -308,6 +311,7 @@ const Dialog = () => {
           defaultLocale,
           selected,
           adoptAll,
+          overwriteAll
         });
 
         totalChangedFields += summary.changedFields;
@@ -471,6 +475,7 @@ const Dialog = () => {
             selected={selected}
             onToggleField={onToggleField}
             adoptAll={adoptAll}
+            overwriteAll={overwriteAll}
           />
 
           {/* Multi-adopt block */}
@@ -487,6 +492,30 @@ const Dialog = () => {
                     }}
                   />
                   Adopt all fields
+                </label>
+
+                <label style={{ display: "flex", gap: 8, marginLeft: 20 }}>
+                  <input
+                    type="checkbox"
+                    checked={overwriteAll}
+                    disabled={!adoptAll}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setOverwriteAll(checked);
+
+                      // Overwrite implies adopt-all and no partial selections
+                      if (checked) {
+                        setAdoptAll(true);
+                        setSelected({});
+                      }
+                    }}
+                  />
+                  <span>
+                    Overwrite all fields
+                    <span style={{ color: "#c00", marginLeft: 6 }}>
+                      (replaces all target values)
+                    </span>
+                  </span>
                 </label>
 
                 <div>

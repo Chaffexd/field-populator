@@ -32,6 +32,7 @@ export async function adoptEntryTree({
   ctCache = {},
   selected = {},
   adoptAll = false,
+  overwriteAll = false,
 }) {
   const summary = {
     updatedEntries: 0,
@@ -90,33 +91,40 @@ export async function adoptEntryTree({
         const srcLink = localizedValues?.[sourceLocale];
         const tgtLink = localizedValues?.[targetLocale];
 
-        // Full adopt if target empty
-        if (
-          (tgtLink === undefined || tgtLink === null) &&
-          srcLink &&
-          (adoptAll || allowedForThisEntry.has(fieldId))
-        ) {
+        if (overwriteAll && srcLink !== undefined) {
           newFields[fieldId] = {
             ...localizedValues,
             [targetLocale]: clone(srcLink),
           };
           changed++;
-        }
+        } else {
+          // Full adopt if target empty
+          if (
+            (tgtLink === undefined || tgtLink === null) &&
+            srcLink &&
+            (adoptAll || allowedForThisEntry.has(fieldId))
+          ) {
+            newFields[fieldId] = {
+              ...localizedValues,
+              [targetLocale]: clone(srcLink),
+            };
+            changed++;
+          }
 
-        // Insert-only (target has something)
-        if (
-          (adoptAll || allowedForThisEntry.has(fieldId)) &&
-          srcLink &&
-          tgtLink &&
-          JSON.stringify(srcLink) !== JSON.stringify(tgtLink)
-        ) {
-          newFields[fieldId] = {
-            ...localizedValues,
-            [targetLocale]: clone(srcLink),
-          };
-          changed++;
+          // Insert-only (target has something)
+          if (
+            (adoptAll || allowedForThisEntry.has(fieldId)) &&
+            srcLink &&
+            tgtLink &&
+            JSON.stringify(srcLink) !== JSON.stringify(tgtLink)
+          ) {
+            newFields[fieldId] = {
+              ...localizedValues,
+              [targetLocale]: clone(srcLink),
+            };
+            changed++;
+          }
         }
-
         const refId = srcLink?.sys?.id || tgtLink?.sys?.id;
         if (refId) refIds.add(refId);
       } else {
@@ -143,31 +151,39 @@ export async function adoptEntryTree({
         const srcArr = localizedValues?.[sourceLocale];
         const tgtArr = localizedValues?.[targetLocale];
 
-        // Full adopt if empty
-        if (
-          (tgtArr === undefined || tgtArr === null) &&
-          srcArr &&
-          (adoptAll || allowedForThisEntry.has(fieldId))
-        ) {
+        if (overwriteAll && srcArr !== undefined) {
           newFields[fieldId] = {
             ...localizedValues,
             [targetLocale]: clone(srcArr),
           };
           changed++;
-        }
+        } else {
+          // Full adopt if empty
+          if (
+            (tgtArr === undefined || tgtArr === null) &&
+            srcArr &&
+            (adoptAll || allowedForThisEntry.has(fieldId))
+          ) {
+            newFields[fieldId] = {
+              ...localizedValues,
+              [targetLocale]: clone(srcArr),
+            };
+            changed++;
+          }
 
-        // Insert-only if target has content
-        if (
-          (adoptAll || allowedForThisEntry.has(fieldId)) &&
-          Array.isArray(srcArr) &&
-          Array.isArray(tgtArr) &&
-          JSON.stringify(srcArr) !== JSON.stringify(tgtArr)
-        ) {
-          newFields[fieldId] = {
-            ...localizedValues,
-            [targetLocale]: clone(srcArr),
-          };
-          changed++;
+          // Insert-only if target has content
+          if (
+            (adoptAll || allowedForThisEntry.has(fieldId)) &&
+            Array.isArray(srcArr) &&
+            Array.isArray(tgtArr) &&
+            JSON.stringify(srcArr) !== JSON.stringify(tgtArr)
+          ) {
+            newFields[fieldId] = {
+              ...localizedValues,
+              [targetLocale]: clone(srcArr),
+            };
+            changed++;
+          }
         }
 
         const ids = new Set([
@@ -195,12 +211,25 @@ export async function adoptEntryTree({
     // LOCALIZED SCALARS / STRINGS / RICH TEXT
     // ---------------------------------------------------------------------
     if (fieldDef.localized) {
-      if (!adoptAll && !allowedForThisEntry.has(fieldId)) continue;
+      if (!overwriteAll && !adoptAll && !allowedForThisEntry.has(fieldId))
+        continue;
 
       const srcVal = localizedValues?.[sourceLocale];
       const tgtVal = localizedValues?.[targetLocale];
 
-      // ✅ FULL ADOPT IF TARGET EMPTY
+      // OVERWRITE MODE — replace target with source
+      if (overwriteAll) {
+        if (srcVal !== undefined) {
+          newFields[fieldId] = {
+            ...localizedValues,
+            [targetLocale]: clone(srcVal),
+          };
+          changed++;
+        }
+        continue;
+      }
+
+      // FULL ADOPT IF TARGET EMPTY
       if (tgtVal === undefined || tgtVal === null) {
         if (srcVal !== undefined) {
           newFields[fieldId] = {
@@ -292,6 +321,7 @@ export async function adoptEntryTree({
       ctCache,
       selected,
       adoptAll,
+      overwriteAll,
     });
 
     summary.updatedEntries += s.updatedEntries;
@@ -301,4 +331,3 @@ export async function adoptEntryTree({
 
   return summary;
 }
-  

@@ -5,6 +5,170 @@ import { documentToReactComponents } from "@contentful/rich-text-react-renderer"
 
 const dmp = new diff_match_patch();
 
+function SafeEntryCard({ title, description, ...props }) {
+  return (
+    <EntryCard
+      {...props}
+      title={typeof title === "string" ? title : String(title ?? "")}
+      description={
+        typeof description === "string"
+          ? description
+          : String(description ?? "")
+      }
+    />
+  );
+}
+
+function extractLTags(raw) {
+  if (!raw) return { l1: [], l2: [], l3: [], flags: {} };
+
+  let value = raw;
+
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return { l1: [], l2: [], l3: [], flags: {} };
+    }
+  }
+
+  if (!value || typeof value !== "object") {
+    return { l1: [], l2: [], l3: [], flags: {} };
+  }
+
+  const normalize = (arr) =>
+    (Array.isArray(arr) ? arr : [])
+      .filter((t) => t && t.title)
+      .map((t) => ({
+        title: t.title,
+        tagCode: t.tagCode || "",
+      }));
+
+  return {
+    l1: normalize(value.l1Tag),
+    l2: normalize(value.l2Tag),
+    l3: normalize(value.l3Tag),
+    flags: {
+      enableL1Tag: Boolean(value.enableL1Tag),
+      enableL2Tag: Boolean(value.enableL2Tag),
+      enableL3Tag: Boolean(value.enableL3Tag),
+    },
+  };
+}
+
+function LTagRenderer({
+  fieldKey,
+  node,
+  level,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+  overwriteAll,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const source = extractLTags(node.source);
+  const target = extractLTags(node.target);
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const checked = overwriteAll ? true : adoptAll ? true : explicitlySelected;
+
+  const renderGroup = (label, items) => {
+    if (!items || items.length === 0) return <div>(empty)</div>;
+
+    return (
+      <Stack flexDirection="row" flexWrap="wrap" gap="spacingXs">
+        {items.map((t) => (
+          <Pill
+            style={{ marginBottom: "5px" }}
+            key={`${label}-${t.tagCode || t.title}`}
+            label={t.tagCode ? `${t.title} (${t.tagCode})` : t.title}
+          />
+        ))}
+      </Stack>
+    );
+  };
+
+  const hasChanged = JSON.stringify(source) !== JSON.stringify(target);
+
+  return (
+    <div
+      key={fieldKey}
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor: hasChanged ? "#fffef8" : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <strong>{fieldKey}</strong>
+
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={checked}
+            disabled={overwriteAll}
+            onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+          />
+          {checked ? "Adopt this field" : "Do not adopt this field"}
+        </label>
+      </div>
+
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+            Source
+          </em>
+
+          {renderGroup("L1", source.l1)}
+          {renderGroup("L2", source.l2)}
+          {renderGroup("L3", source.l3)}
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+            Target
+          </em>
+
+          {renderGroup("L1", target.l1)}
+          {renderGroup("L2", target.l2)}
+          {renderGroup("L3", target.l3)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function asString(val, fallback = "—") {
+  if (val == null) return fallback;
+
+  if (typeof val === "string") return val;
+  if (typeof val === "number" || typeof val === "boolean") return String(val);
+
+  // Rich text
+  if (isRichTextDocument(val)) {
+    return richTextToPlainText(val);
+  }
+
+  if (Array.isArray(val)) {
+    return val.map((v) => asString(v)).join(", ");
+  }
+
+  return fallback;
+}
+
 function extractTags(raw) {
   if (!raw) return [];
 
@@ -37,6 +201,7 @@ function TagRenderer({
   selected,
   onToggleField,
   adoptAll,
+  overwriteAll,
 }) {
   const indentStyle = { marginLeft: `${level * 20}px` };
 
@@ -47,7 +212,7 @@ function TagRenderer({
 
   const selectedSet = selected?.[entryId];
   const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const checked = adoptAll ? true : explicitlySelected;
+  const checked = overwriteAll ? true : adoptAll ? true : explicitlySelected;
 
   return (
     <div
@@ -76,6 +241,7 @@ function TagRenderer({
           <input
             type="checkbox"
             checked={checked}
+            disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
           {checked ? "Adopt this field" : "Do not adopt this field"}
@@ -128,12 +294,88 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;");
 }
 
+function HeroCards({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {value.map((card, i) => {
+        const title =
+          card.entryTitle ||
+          card.pageLink?.slug ||
+          card.pageLink?.id ||
+          `Hero ${i + 1}`;
+
+        return (
+          <div
+            key={card.pageLink?.id || `${title}-${i}`}
+            style={{
+              border: "1px solid #eee",
+              borderRadius: 6,
+              padding: 12,
+              background: "#fff",
+            }}
+          >
+            <strong style={{ display: "block", marginBottom: 6 }}>
+              {asString(title)}
+            </strong>
+
+            {card.subhead && (
+              <div style={{ marginBottom: 6 }}>
+                {documentToReactComponents(card.subhead)}
+              </div>
+            )}
+
+            {card.text && (
+              <div style={{ marginBottom: 8 }}>
+                {documentToReactComponents(card.text)}
+              </div>
+            )}
+
+            {card.heroImage?.assetUrl && (
+              <img
+                src={card.heroImage.assetUrl}
+                alt={card.heroImage.altText || ""}
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: 200,
+                  objectFit: "contain",
+                  borderRadius: 4,
+                  marginBottom: 8,
+                }}
+              />
+            )}
+
+            {card.pageLink?.id && (
+              <div style={{ fontSize: 12, color: "#666" }}>
+                <strong>Page link:</strong>{" "}
+                {card.pageLink.slug
+                  ? `${card.pageLink.slug} (${card.pageLink.id})`
+                  : card.pageLink.id}
+              </div>
+            )}
+
+            {card.ctaText || card.ctaUrl ? (
+              <div style={{ marginTop: 6, fontSize: 12 }}>
+                <strong>CTA:</strong>{" "}
+                {card.ctaText ? card.ctaText : "(no text)"}{" "}
+                {card.ctaUrl ? `→ ${card.ctaUrl}` : ""}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const JSON_FIELDS = {
   demonstratedResults: "demonstratedResults",
   features: "features",
   imageGallery: "imageGallery",
   featuredProducts: "featuredProducts",
   relatedProducts: "relatedProducts",
+  heroCards: "heroCards",
 };
 
 function parseJsonOnce(raw) {
@@ -223,17 +465,103 @@ function ImageGallery({ value }) {
   );
 }
 
+function isRichTextDocument(v) {
+  return (
+    v &&
+    typeof v === "object" &&
+    v.nodeType === "document" &&
+    Array.isArray(v.content)
+  );
+}
+
+function richTextToPlainText(doc) {
+  if (!isRichTextDocument(doc)) return "";
+
+  const walk = (node) => {
+    if (!node) return "";
+    if (node.nodeType === "text") return node.value || "";
+    if (!Array.isArray(node.content)) return "";
+    return node.content.map(walk).join("");
+  };
+
+  return walk(doc).replace(/\s+/g, " ").trim();
+}
+
 function ProductList({ value }) {
   if (!Array.isArray(value)) return null;
 
+  const getTitle = (p) => {
+    // navigationTitle is rich text
+    if (isRichTextDocument(p?.navigationTitle)) {
+      return richTextToPlainText(p.navigationTitle);
+    }
+
+    // normal string titles
+    return (
+      p?.title || p?.entryTitle || p?.navigationTitle || p?.slug || p?.id || "—"
+    );
+  };
+
+  const getDescription = (p) => {
+    if (isRichTextDocument(p?.navigationDescription)) {
+      return richTextToPlainText(p.navigationDescription);
+    }
+    return p?.navigationDescription || "";
+  };
+
+  const getCtn = (p) => {
+    return p?.ctn || p?.CTN || p?.productCtn || "";
+  };
+
   return (
-    <ul>
-      {value.map((p) => (
-        <li key={p.id}>
-          {p.title} ({p.ctn})
-        </li>
-      ))}
-    </ul>
+    <div style={{ display: "grid", gap: 10 }}>
+      {value.map((p, i) => {
+        const title = asString(getTitle(p), "—");
+        const description = asString(getDescription(p), "");
+        const ctn = asString(getCtn(p), "");
+
+        return (
+          <div
+            key={p?.id || `${title}-${i}`}
+            style={{
+              border: "1px solid #eee",
+              padding: 10,
+              borderRadius: 6,
+              background: "#fff",
+            }}
+          >
+            <strong style={{ display: "block", marginBottom: 4 }}>
+              {title}
+              {ctn ? ` (${ctn})` : ""}
+            </strong>
+
+            {description ? (
+              <div style={{ fontSize: 13, color: "#555" }}>{description}</div>
+            ) : null}
+
+            {p?.navigationThumbnail?.assetUrl ? (
+              <img
+                src={p.navigationThumbnail.assetUrl}
+                alt={p.navigationThumbnail.altText || ""}
+                style={{
+                  marginTop: 8,
+                  maxWidth: "100%",
+                  maxHeight: 160,
+                  objectFit: "contain",
+                  borderRadius: 4,
+                }}
+              />
+            ) : null}
+
+            {p?.slug ? (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                <strong>Slug:</strong> {p.slug}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -242,16 +570,27 @@ function getRelatedEntryCardText(entry) {
     typeof entry.type === "string" &&
     entry.type.toLowerCase().startsWith("template");
 
+  const extractText = (val) => {
+    if (typeof val === "string") return val;
+    if (isRichTextDocument(val)) return richTextToPlainText(val);
+    return "";
+  };
+
   const baseTitle =
-    entry.navigationTitle ||
-    entry.slug ||
-    `${entry.type || "Item"} – ${entry.id}`;
+    extractText(entry.navigationTitle) ||
+    extractText(entry.title) ||
+    extractText(entry.slug) ||
+    String(entry.id || "—");
 
   const title = isTemplate ? `Template – ${baseTitle}` : baseTitle;
 
-  const description = entry.navigationDescription || entry.type || entry.id;
+  const description =
+    extractText(entry.navigationDescription) || extractText(entry.type) || "";
 
-  return { title, description };
+  return {
+    title: String(title),
+    description: String(description),
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -297,6 +636,7 @@ function FrontendTagsRenderer({
   selected,
   onToggleField,
   adoptAll,
+  overwriteAll,
 }) {
   const indentStyle = { marginLeft: `${level * 20}px` };
 
@@ -312,7 +652,7 @@ function FrontendTagsRenderer({
 
   const selectedSet = selected?.[entryId];
   const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const checked = adoptAll ? true : explicitlySelected;
+  const checked = overwriteAll ? true : adoptAll ? true : explicitlySelected;
 
   return (
     <div
@@ -360,6 +700,7 @@ function FrontendTagsRenderer({
           <input
             type="checkbox"
             checked={checked}
+            disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
           {checked ? "Adopt this field" : "Do not adopt this field"}
@@ -454,6 +795,7 @@ function RelatedProductPortfolioRenderer({
   selected,
   onToggleField,
   adoptAll,
+  overwriteAll,
 }) {
   const indentStyle = { marginLeft: `${level * 20}px` };
 
@@ -469,7 +811,7 @@ function RelatedProductPortfolioRenderer({
 
   const selectedSet = selected?.[entryId];
   const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const checked = adoptAll ? true : explicitlySelected;
+  const checked = overwriteAll ? true : adoptAll ? true : explicitlySelected;
 
   const renderEntryCard = (entry) => {
     const entryUrl =
@@ -480,9 +822,9 @@ function RelatedProductPortfolioRenderer({
     const { title, description } = getRelatedEntryCardText(entry);
 
     return (
-      <EntryCard
+      <SafeEntryCard
         key={entry.id}
-        title={title}
+        title={String(title)}
         description={description}
         size="small"
       />
@@ -535,6 +877,7 @@ function RelatedProductPortfolioRenderer({
           <input
             type="checkbox"
             checked={checked}
+            disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
           {checked ? "Adopt this field" : "Do not adopt this field"}
@@ -622,6 +965,7 @@ function MainImageAssetRenderer({
   selected,
   onToggleField,
   adoptAll,
+  overwriteAll,
 }) {
   const indentStyle = { marginLeft: `${level * 20}px` };
 
@@ -639,7 +983,7 @@ function MainImageAssetRenderer({
 
   const selectedSet = selected?.[entryId];
   const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const checked = adoptAll ? true : explicitlySelected;
+  const checked = overwriteAll ? true : adoptAll ? true : explicitlySelected;
 
   const renderCard = (asset) => {
     if (!asset || !asset.url) {
@@ -728,6 +1072,7 @@ function MainImageAssetRenderer({
           <input
             type="checkbox"
             checked={checked}
+            disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
           {checked ? "Adopt this field" : "Do not adopt this field"}
@@ -844,6 +1189,7 @@ function NodeRenderer({
   selected,
   onToggleField,
   adoptAll,
+  overwriteAll,
 }) {
   const indentStyle = { marginLeft: `${level * 20}px` };
 
@@ -864,6 +1210,31 @@ function NodeRenderer({
   /* 🔥 CUSTOM RENDERERS                                                    */
   /* ---------------------------------------------------------------------- */
 
+  if (node.type === "field" && fieldKey === "name") {
+    // only render with this if it looks like the L-tag JSON
+    const parsed = parseJsonOnce(node.source) || parseJsonOnce(node.target);
+
+    const looksLikeLTags =
+      parsed &&
+      typeof parsed === "object" &&
+      ("l1Tag" in parsed || "l2Tag" in parsed || "l3Tag" in parsed);
+
+    if (looksLikeLTags) {
+      return (
+        <LTagRenderer
+          fieldKey={fieldKey}
+          node={node}
+          level={level}
+          entryId={entryId}
+          selected={selected}
+          onToggleField={onToggleField}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+        />
+      );
+    }
+  }
+
   if (node.type === "field" && fieldKey === "tag") {
     return (
       <TagRenderer
@@ -876,6 +1247,7 @@ function NodeRenderer({
         selected={selected}
         onToggleField={onToggleField}
         adoptAll={adoptAll}
+        overwriteAll={overwriteAll}
       />
     );
   }
@@ -915,10 +1287,18 @@ function NodeRenderer({
         case "relatedproducts":
           return <ProductList value={value} />;
 
+        case "herocards":
+          return <HeroCards value={value} />;
+
         default:
           return null;
       }
     };
+    const checked = overwriteAll
+      ? true
+      : adoptAll
+      ? true
+      : selected?.[entryId]?.has(fieldKey);
 
     return (
       <div
@@ -956,7 +1336,7 @@ function NodeRenderer({
           >
             <input
               type="checkbox"
-              checked={adoptAll || selected?.[entryId]?.has(fieldKey)}
+              checked={checked}
               onChange={(e) =>
                 onToggleField(entryId, fieldKey, e.target.checked)
               }
@@ -1078,9 +1458,9 @@ function NodeRenderer({
 
     return (
       <div style={{ marginLeft: `${level * 20}px`, marginBottom: 12 }}>
-        <EntryCard
-          title={node.title}
-          description={node.slug}
+        <SafeEntryCard
+          title={asString(node.title, node.entryId)}
+          description={asString(node.slug, "")}
           size="small"
           isDraft
           onClick={() => {
@@ -1108,7 +1488,7 @@ function NodeRenderer({
     const explicitlySelected = Boolean(
       selectedSet && selectedSet.has(fieldKey)
     );
-    const checked = adoptAll ? true : explicitlySelected;
+    const checked = overwriteAll ? true : adoptAll ? true : explicitlySelected;
 
     const sourceAsset = parseAssetFromString(node.source);
     const targetAsset = parseAssetFromString(node.target);
@@ -1173,6 +1553,7 @@ function NodeRenderer({
             <input
               type="checkbox"
               checked={checked}
+              disabled={overwriteAll}
               onChange={(e) =>
                 onToggleField(entryId, fieldKey, e.target.checked)
               }
@@ -1285,6 +1666,7 @@ function NodeRenderer({
                   selected={selected}
                   onToggleField={onToggleField}
                   adoptAll={adoptAll}
+                  overwriteAll={overwriteAll}
                 />
               );
             }
@@ -1302,6 +1684,7 @@ function NodeRenderer({
                 selected={selected}
                 onToggleField={onToggleField}
                 adoptAll={adoptAll}
+                overwriteAll={overwriteAll}
               />
             );
           })}
@@ -1331,6 +1714,7 @@ function NodeRenderer({
         selected={selected}
         onToggleField={onToggleField}
         adoptAll={adoptAll}
+        overwriteAll={overwriteAll}
       />
     );
   }
@@ -1348,6 +1732,7 @@ function CollapsibleReference({
   selected,
   onToggleField,
   adoptAll,
+  overwriteAll,
 }) {
   const [expanded, setExpanded] = useState(false);
   const indentStyle = { marginLeft: `${level * 20}px` };
@@ -1392,6 +1777,7 @@ function CollapsibleReference({
               selected={selected}
               onToggleField={onToggleField}
               adoptAll={adoptAll}
+              overwriteAll={overwriteAll}
             />
           ))}
         </div>
@@ -1408,6 +1794,7 @@ const DiffChecker = ({
   selected,
   onToggleField,
   adoptAll,
+  overwriteAll,
 }) => {
   if (!diffTree) return <div style={{ margin: 20 }}>Loading diffs…</div>;
 
@@ -1424,6 +1811,7 @@ const DiffChecker = ({
           selected={selected}
           onToggleField={onToggleField}
           adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
         />
       ))}
     </div>
