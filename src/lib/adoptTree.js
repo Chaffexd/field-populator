@@ -1,6 +1,7 @@
 import { mergeSourceAdditionsIntoTarget } from "./mergeText";
 import { callCMA } from "./rateLimiter";
 import { mergeRichTextDocuments } from "./mergeRichText";
+import { normalizeContentfulDate } from "./helpers";
 
 /**
  * Recursively adopt localized changes from sourceLocale -> targetLocale
@@ -90,6 +91,60 @@ export async function adoptEntryTree({
       if (fieldDef.localized) {
         const srcLink = localizedValues?.[sourceLocale];
         const tgtLink = localizedValues?.[targetLocale];
+
+        // ✅ Date fields: validate before writing to Contentful
+        if (fieldDef.type === "Date") {
+          const normalizedSrc = normalizeContentfulDate(srcVal);
+          const normalizedTgt = normalizeContentfulDate(tgtVal);
+
+          // If src is invalid, skip adopting this field entirely
+          if (srcVal != null && !normalizedSrc) {
+            console.warn(
+              `[Locale Populator] Skipping invalid date for ${entryId}.${fieldId}.${sourceLocale}:`,
+              srcVal
+            );
+            continue;
+          }
+
+          // Overwrite mode
+          if (overwriteAll) {
+            if (normalizedSrc !== undefined) {
+              newFields[fieldId] = {
+                ...localizedValues,
+                [targetLocale]: normalizedSrc,
+              };
+              changed++;
+            }
+            continue;
+          }
+
+          // Full adopt if empty
+          if (tgtVal === undefined || tgtVal === null) {
+            if (normalizedSrc !== undefined) {
+              newFields[fieldId] = {
+                ...localizedValues,
+                [targetLocale]: normalizedSrc,
+              };
+              changed++;
+            }
+            continue;
+          }
+
+          // Only update if different
+          if (
+            normalizedSrc !== undefined &&
+            normalizedSrc !== normalizedTgt &&
+            (adoptAll || allowedForThisEntry.has(fieldId))
+          ) {
+            newFields[fieldId] = {
+              ...localizedValues,
+              [targetLocale]: normalizedSrc,
+            };
+            changed++;
+          }
+
+          continue;
+        }
 
         if (overwriteAll && srcLink !== undefined) {
           newFields[fieldId] = {

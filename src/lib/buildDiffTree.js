@@ -91,6 +91,7 @@ export async function buildDiffTree({
       def.items?.type === "Link" &&
       def.items.linkType === "Entry";
     const isAssetLink = def.type === "Link" && def.linkType === "Asset";
+    const isRichText = def.type === "RichText";
 
     // -----------------------------
     // 1) SINGLE ENTRY REFERENCE FIELDS
@@ -409,10 +410,99 @@ export async function buildDiffTree({
     }
 
     // Default behaviour for normal fields
+    // ✅ Rich Text: keep doc AND expand embedded entries
+    if (isRichText) {
+      const srcDoc = sourceVal ?? null;
+      const tgtDoc = targetVal ?? null;
+
+      const srcEmbeddedIds = Array.from(
+        extractEmbeddedEntryIdsFromRichText(srcDoc)
+      );
+      const tgtEmbeddedIds = Array.from(
+        extractEmbeddedEntryIdsFromRichText(tgtDoc)
+      );
+
+      const allEmbeddedIds = Array.from(
+        new Set([...srcEmbeddedIds, ...tgtEmbeddedIds])
+      );
+
+      const embeddedChildren = {};
+
+      for (const embeddedId of allEmbeddedIds) {
+        if (!embeddedId) continue;
+
+        let embeddedEntry = cache[embeddedId];
+        if (!embeddedEntry) {
+          embeddedEntry = await callCMA(() =>
+            cma.entry.get({
+              entryId: embeddedId,
+              environmentId: envId,
+              spaceId,
+            })
+          );
+          cache[embeddedId] = embeddedEntry;
+        }
+
+        // If embedded entry is a template, short-circuit
+        if (isTemplateEntry(embeddedEntry)) {
+          embeddedChildren[embeddedId] = {
+            type: "template",
+            entryId: embeddedId,
+            title:
+              embeddedEntry.fields?.title?.[defaultLocale] ||
+              embeddedEntry.fields?.title?.[sourceLocale] ||
+              "(no title)",
+            slug:
+              embeddedEntry.fields?.slug?.[defaultLocale] ||
+              embeddedEntry.fields?.slug?.[sourceLocale] ||
+              "(no slug)",
+          };
+          continue;
+        }
+
+        // Expand embedded entry as a reference subtree
+        const childTree = await buildDiffTree({
+          entry: embeddedEntry,
+          cma,
+          sourceLocale,
+          targetLocale,
+          defaultLocale,
+          cache,
+          visited,
+          depth: depth + 1,
+          maxDepth,
+          maxNodes,
+          ctCache,
+          assetCache,
+        });
+
+        embeddedChildren[embeddedId] = {
+          type: "reference",
+          id: embeddedId,
+          linkEntryId: embeddedId,
+          children: childTree,
+        };
+      }
+
+      tree[fieldId] = {
+        type: "field",
+        source: srcDoc,
+        target: tgtDoc,
+        isRichText: true,
+
+        // 🔥 this is what DiffChecker needs to render embedded entry content
+        embeddedChildren,
+      };
+
+      continue;
+    }
+
+    // Default behaviour for normal fields
     tree[fieldId] = {
       type: "field",
-      source: sourceVal == null ? "" : stringifyFieldValue(sourceVal),
-      target: targetVal == null ? "(empty)" : stringifyFieldValue(targetVal),
+      source: sourceVal ?? null,
+      target: targetVal ?? null,
+      fieldType: def.type,
     };
   }
 
@@ -460,25 +550,97 @@ function stringifyFieldValue(value) {
   if (typeof value === "string") return value;
 
   if (value?.nodeType === "document") {
-    return extractPlainTextFromRichText(value);
+    return richTextToStableDiffString(value).trim();
   }
 
   return safeStringify(value);
 }
 
 /** Extract plain text from a Rich Text document */
-function extractPlainTextFromRichText(richText) {
-  if (!richText || typeof richText !== "object") return "";
-  if (Array.isArray(richText.content)) {
-    return richText.content.map(extractPlainTextFromRichText).join(" ");
+function richTextToStableDiffString(node) {
+  if (!node || typeof node !== "object") return "";
+
+  // TEXT
+  if (node.nodeType === "text") {
+    return node.value || "";
   }
-  if (richText.nodeType === "text") {
-    return richText.value || "";
+
+  // EMBEDDED ENTRIES (block + inline)
+  if (
+    node.nodeType === "embedded-entry-block" ||
+    node.nodeType === "embedded-entry-inline"
+  ) {
+    const id = node?.data?.target?.sys?.id;
+    return `\n<EMBEDDED_ENTRY:${id || "unknown"}>\n`;
   }
-  if (richText.content) {
-    return extractPlainTextFromRichText(richText.content);
+
+  // EMBEDDED ASSETS
+  if (node.nodeType === "embedded-asset-block") {
+    const id = node?.data?.target?.sys?.id;
+    return `\n<EMBEDDED_ASSET:${id || "unknown"}>\n`;
   }
+
+  // ENTRY HYPERLINKS (these matter too!)
+  if (node.nodeType === "entry-hyperlink") {
+    const id = node?.data?.target?.sys?.id;
+    return `<ENTRY_LINK:${id || "unknown"}>`;
+  }
+
+  // Recurse children
+  if (Array.isArray(node.content)) {
+    const childText = node.content.map(richTextToStableDiffString).join("");
+
+    // Add structure-aware spacing
+    const blockNodes = new Set([
+      "paragraph",
+      "heading-1",
+      "heading-2",
+      "heading-3",
+      "heading-4",
+      "heading-5",
+      "heading-6",
+      "unordered-list",
+      "ordered-list",
+      "list-item",
+      "blockquote",
+      "hr",
+      "table",
+      "table-row",
+      "table-cell",
+      "document",
+    ]);
+
+    if (blockNodes.has(node.nodeType)) {
+      return childText.trim() ? `${childText.trim()}\n` : "";
+    }
+
+    return childText;
+  }
+
   return "";
+}
+
+function extractEmbeddedEntryIdsFromRichText(node, ids = new Set()) {
+  if (!node || typeof node !== "object") return ids;
+
+  const entryNodeTypes = new Set([
+    "embedded-entry-block",
+    "embedded-entry-inline",
+    "entry-hyperlink",
+  ]);
+
+  if (entryNodeTypes.has(node.nodeType)) {
+    const id = node?.data?.target?.sys?.id;
+    if (id) ids.add(id);
+  }
+
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) {
+      extractEmbeddedEntryIdsFromRichText(child, ids);
+    }
+  }
+
+  return ids;
 }
 
 function isTemplateEntry(entry) {

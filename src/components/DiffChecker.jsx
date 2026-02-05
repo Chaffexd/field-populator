@@ -2,6 +2,15 @@ import React, { useState } from "react";
 import { diff_match_patch } from "diff-match-patch";
 import { Pill, Stack, EntryCard } from "@contentful/f36-components";
 import { documentToReactComponents } from "@contentful/rich-text-react-renderer";
+import {
+  toDiffableString,
+  splitStringByEmbeddedEntryTokens,
+  uniqueEmbeddedEntryParts,
+  stripEmbeddedEntryTokens,
+  buildEntryUrl,
+  formatEmbeddedEntryLabel,
+  parseJsonAssetField,
+} from "../lib/helpers";
 
 const dmp = new diff_match_patch();
 
@@ -371,11 +380,15 @@ function HeroCards({ value }) {
 
 const JSON_FIELDS = {
   demonstratedResults: "demonstratedResults",
+  secondaryFeatures: "secondaryFeatures",
   features: "features",
   imageGallery: "imageGallery",
   featuredProducts: "featuredProducts",
   relatedProducts: "relatedProducts",
   heroCards: "heroCards",
+  featuredSolutions: "featuredSolutions",
+  mediaGallery: "mediaGallery",
+  promoBanner: "promoBanner",
 };
 
 function parseJsonOnce(raw) {
@@ -1209,6 +1222,320 @@ function NodeRenderer({
   /* ---------------------------------------------------------------------- */
   /* 🔥 CUSTOM RENDERERS                                                    */
   /* ---------------------------------------------------------------------- */
+  function PromoBanner({ value }) {
+    if (!Array.isArray(value)) return null;
+
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        {value.map((b, i) => {
+          const hero = parseJsonAssetField(b.heroImage);
+          const headline = b.headline
+            ? documentToReactComponents(b.headline)
+            : null;
+          const summary = b.summary
+            ? documentToReactComponents(b.summary)
+            : null;
+          const pageLink = b.pageLink;
+
+          return (
+            <div
+              key={pageLink?.id || b.entryTitle || i}
+              style={{
+                border: "1px solid #eee",
+                borderRadius: 6,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: 6 }}>
+                {b.entryTitle || "(no title)"}
+              </strong>
+
+              {headline ? (
+                <div style={{ marginBottom: 6 }}>{headline}</div>
+              ) : null}
+
+              {summary ? (
+                <div style={{ marginBottom: 10 }}>{summary}</div>
+              ) : null}
+
+              {/* image */}
+              {hero?.kind === "image" ? (
+                <img
+                  src={hero.url}
+                  alt={hero.alt || ""}
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: 220,
+                    objectFit: "contain",
+                    borderRadius: 4,
+                    marginBottom: 10,
+                  }}
+                />
+              ) : hero?.kind === "video" ? (
+                <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+                  🎥 Video: {hero.assetName || "(unnamed)"}
+                </div>
+              ) : null}
+
+              {/* CTA */}
+              {b.ctaText || b.ctaUrl ? (
+                <div style={{ fontSize: 12 }}>
+                  <strong>CTA:</strong> {b.ctaText ? b.ctaText : "(no text)"}{" "}
+                  {b.ctaUrl ? `→ ${b.ctaUrl}` : ""}
+                </div>
+              ) : null}
+
+              {/* page link */}
+              {pageLink?.id ? (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                  <strong>Page link:</strong>{" "}
+                  {pageLink.slug
+                    ? `${pageLink.slug} (${pageLink.id})`
+                    : pageLink.id}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function SecondaryFeatures({ value }) {
+    if (!Array.isArray(value)) return null;
+
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        {value.map((f, i) => {
+          const title =
+            f.entryTitle || (isRichTextDocument(f.subhead) ? "—" : "—");
+
+          const subhead = f.subhead
+            ? documentToReactComponents(f.subhead)
+            : null;
+          const text = f.text ? documentToReactComponents(f.text) : null;
+
+          const hero = parseJsonAssetField(f.heroImage);
+          const pageLink = f.pageLink;
+
+          return (
+            <div
+              key={pageLink?.id || title || i}
+              style={{
+                border: "1px solid #eee",
+                borderRadius: 6,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: 6 }}>
+                {f.entryTitle || "(no title)"}
+              </strong>
+
+              {subhead ? (
+                <div style={{ marginBottom: 6 }}>{subhead}</div>
+              ) : null}
+
+              {text ? <div style={{ marginBottom: 10 }}>{text}</div> : null}
+
+              {/* image */}
+              {hero?.kind === "image" ? (
+                <img
+                  src={hero.url}
+                  alt={hero.alt || ""}
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: 200,
+                    objectFit: "contain",
+                    borderRadius: 4,
+                    marginBottom: 10,
+                  }}
+                />
+              ) : hero?.kind === "video" ? (
+                <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+                  🎥 Video: {hero.assetName || "(unnamed)"}
+                </div>
+              ) : null}
+
+              {/* CTA */}
+              {f.ctaText || f.ctaUrl ? (
+                <div style={{ fontSize: 12 }}>
+                  <strong>CTA:</strong> {f.ctaText ? f.ctaText : "(no text)"}{" "}
+                  {f.ctaUrl ? `→ ${f.ctaUrl}` : ""}
+                </div>
+              ) : null}
+
+              {/* page link */}
+              {pageLink?.id ? (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                  <strong>Page link:</strong>{" "}
+                  {pageLink.slug
+                    ? `${pageLink.slug} (${pageLink.id})`
+                    : pageLink.id}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function MediaGallery({ value }) {
+    if (!Array.isArray(value)) return null;
+
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, 1fr)",
+          gap: 12,
+        }}
+      >
+        {value.map((item, i) => {
+          const asset = parseJsonAssetField(item);
+
+          if (!asset) {
+            return (
+              <div key={i} style={{ border: "1px solid #eee", padding: 10 }}>
+                (invalid asset)
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={asset.url || `${asset.assetName}-${i}`}
+              style={{
+                border: "1px solid #eee",
+                borderRadius: 6,
+                padding: 10,
+                background: "#fff",
+              }}
+            >
+              {asset.kind === "image" ? (
+                <img
+                  src={asset.url}
+                  alt={asset.alt || ""}
+                  style={{
+                    width: "100%",
+                    maxHeight: 180,
+                    objectFit: "contain",
+                    borderRadius: 4,
+                    marginBottom: 8,
+                  }}
+                />
+              ) : (
+                <div style={{ fontSize: 12, color: "#666" }}>
+                  🎥 Video: {asset.assetName || "(unnamed)"}
+                </div>
+              )}
+
+              <div style={{ fontSize: 12, color: "#666" }}>
+                <strong>{asset.assetName || "(no name)"}</strong>
+              </div>
+
+              {asset.alt ? (
+                <div style={{ fontSize: 12, color: "#777", marginTop: 4 }}>
+                  <strong>Alt:</strong> {asset.alt}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function FeaturedSolutions({ value }) {
+    if (!Array.isArray(value)) return null;
+
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        {value.map((item, i) => {
+          const headline = item?.headline
+            ? documentToReactComponents(item.headline)
+            : null;
+
+          const text = item?.text ? documentToReactComponents(item.text) : null;
+
+          const asset = parseJsonAssetField(item?.imageVideoAsset);
+
+          const pageLink = item?.pageLink;
+
+          return (
+            <div
+              key={pageLink?.id || item?.entryTitle || i}
+              style={{
+                border: "1px solid #eee",
+                borderRadius: 6,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: 6 }}>
+                {item?.entryTitle || "(no title)"}
+              </strong>
+
+              {headline ? (
+                <div style={{ marginBottom: 6 }}>{headline}</div>
+              ) : null}
+
+              {text ? <div style={{ marginBottom: 10 }}>{text}</div> : null}
+
+              {/* image */}
+              {asset?.kind === "image" ? (
+                <img
+                  src={asset.url}
+                  alt={asset.alt || ""}
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: 200,
+                    objectFit: "contain",
+                    borderRadius: 4,
+                    marginBottom: 10,
+                  }}
+                />
+              ) : asset?.kind === "video" ? (
+                <div
+                  style={{
+                    padding: 8,
+                    border: "1px solid #eee",
+                    borderRadius: 6,
+                    marginBottom: 10,
+                    fontSize: 12,
+                    color: "#666",
+                  }}
+                >
+                  🎥 Video: {asset.assetName || "(unnamed)"}
+                </div>
+              ) : null}
+
+              {/* CTA */}
+              {item?.ctaText || item?.ctaUrl ? (
+                <div style={{ fontSize: 12 }}>
+                  <strong>CTA:</strong>{" "}
+                  {item.ctaText ? item.ctaText : "(no text)"}{" "}
+                  {item.ctaUrl ? `→ ${item.ctaUrl}` : ""}
+                </div>
+              ) : null}
+
+              {/* page link */}
+              {pageLink?.id ? (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                  <strong>Page link:</strong>{" "}
+                  {pageLink.slug
+                    ? `${pageLink.slug} (${pageLink.id})`
+                    : pageLink.id}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   if (node.type === "field" && fieldKey === "name") {
     // only render with this if it looks like the L-tag JSON
@@ -1277,11 +1604,20 @@ function NodeRenderer({
         case "demonstratedresults":
           return <DemonstratedResults value={value} />;
 
+        case "promobanner":
+          return <PromoBanner value={value} />;
+
         case "features":
           return <Features value={value} />;
 
+        case "secondaryfeatures":
+          return <SecondaryFeatures value={value} />;
+
         case "imagegallery":
           return <ImageGallery value={value} />;
+
+        case "mediagallery":
+          return <MediaGallery value={value} />;
 
         case "featuredproducts":
         case "relatedproducts":
@@ -1289,6 +1625,8 @@ function NodeRenderer({
 
         case "herocards":
           return <HeroCards value={value} />;
+        case "featuredsolutions":
+          return <FeaturedSolutions value={value} />;
 
         default:
           return null;
@@ -1476,6 +1814,21 @@ function NodeRenderer({
   /* ---------------------------------------------------------------------- */
 
   if (node.type === "field") {
+    const sourceStr = node.isRichText
+      ? richTextToStableDiffString(node.source)
+      : toDiffableString(node.source);
+
+    const targetStr = node.isRichText
+      ? richTextToStableDiffString(node.target)
+      : toDiffableString(node.target);
+
+    const embeddedChildren = node.embeddedChildren || {};
+    const hasEmbeddedChildren =
+      embeddedChildren && Object.keys(embeddedChildren).length > 0;
+
+    console.log("sourceStr is", sourceStr);
+    console.log("targetStr is", targetStr);
+
     const changed = node.source !== node.target;
     const fieldUrl = buildFieldUrl({
       spaceId,
@@ -1490,11 +1843,22 @@ function NodeRenderer({
     );
     const checked = overwriteAll ? true : adoptAll ? true : explicitlySelected;
 
-    const sourceAsset = parseAssetFromString(node.source);
-    const targetAsset = parseAssetFromString(node.target);
-    const hasJsonImage = Boolean(sourceAsset || targetAsset);
+    const sourceAsset = parseJsonAssetField(node.source);
+    const targetAsset = parseJsonAssetField(node.target);
+
+    const jsonAssetFields = new Set([
+      "navigationThumbnail",
+      "mastheadAsset",
+      "mainAsset",
+      "mastheadImage",
+    ]);
+
+    const forceJsonAssetImage = jsonAssetFields.has(fieldKey);
+
     const hasAssetLinkImage = Boolean(node.isImage);
-    const isImageField = hasAssetLinkImage || hasJsonImage;
+    const hasJsonImage = Boolean(sourceAsset || targetAsset);
+    const isImageField =
+      forceJsonAssetImage || hasAssetLinkImage || hasJsonImage;
 
     const sourceImageUrl =
       hasAssetLinkImage && node.sourceImageUrl
@@ -1570,7 +1934,7 @@ function NodeRenderer({
             </em>
             {isImageField ? (
               <div style={{ ...fieldBoxStyle, textAlign: "center" }}>
-                {sourceImageUrl ? (
+                {sourceAsset?.kind === "image" ? (
                   <img
                     src={sourceImageUrl}
                     alt={sourceAlt}
@@ -1581,21 +1945,36 @@ function NodeRenderer({
                       borderRadius: 4,
                     }}
                   />
+                ) : sourceAsset?.kind === "video" ? (
+                  <div style={{ fontSize: 12, color: "#666" }}>
+                    🎥 Video: {sourceAsset.assetName || "(unnamed)"}
+                  </div>
                 ) : (
                   <span>(no image)</span>
                 )}
               </div>
             ) : (
               <div style={fieldBoxStyle}>
-                {node.source === "" ? (
+                {node.isRichText ? (
+                  <RichTextDiffWithEmbeddedRefs
+                    side="source"
+                    sourceStr={sourceStr}
+                    targetStr={targetStr}
+                    embeddedChildren={embeddedChildren}
+                    level={level}
+                    spaceId={spaceId}
+                    environmentId={environmentId}
+                    selected={selected}
+                    onToggleField={onToggleField}
+                    adoptAll={adoptAll}
+                    overwriteAll={overwriteAll}
+                  />
+                ) : sourceStr === "" ? (
                   "(empty)"
                 ) : (
                   <span
                     dangerouslySetInnerHTML={{
-                      __html: renderDiffHtmlSourceGreen(
-                        node.source,
-                        node.target
-                      ),
+                      __html: renderDiffHtmlSourceGreen(sourceStr, targetStr),
                     }}
                   />
                 )}
@@ -1627,12 +2006,26 @@ function NodeRenderer({
               </div>
             ) : (
               <div style={fieldBoxStyle}>
-                {node.target === "(empty)" ? (
+                {node.isRichText ? (
+                  <RichTextDiffWithEmbeddedRefs
+                    side="target"
+                    sourceStr={sourceStr}
+                    targetStr={targetStr}
+                    embeddedChildren={embeddedChildren}
+                    level={level}
+                    spaceId={spaceId}
+                    environmentId={environmentId}
+                    selected={selected}
+                    onToggleField={onToggleField}
+                    adoptAll={adoptAll}
+                    overwriteAll={overwriteAll}
+                  />
+                ) : targetStr === "(empty)" ? (
                   "(empty)"
                 ) : (
                   <span
                     dangerouslySetInnerHTML={{
-                      __html: renderDiffHtmlTargetRed(node.source, node.target),
+                      __html: renderDiffHtmlTargetRed(sourceStr, targetStr),
                     }}
                   />
                 )}
@@ -1819,3 +2212,151 @@ const DiffChecker = ({
 };
 
 export default DiffChecker;
+
+function richTextToStableDiffString(node) {
+  if (!node || typeof node !== "object") return "";
+
+  if (node.nodeType === "text") {
+    return node.value || "";
+  }
+
+  if (
+    node.nodeType === "embedded-entry-block" ||
+    node.nodeType === "embedded-entry-inline"
+  ) {
+    const id = node?.data?.target?.sys?.id;
+    return `\n<EMBEDDED_ENTRY:${id || "unknown"}>\n`;
+  }
+
+  if (node.nodeType === "embedded-asset-block") {
+    const id = node?.data?.target?.sys?.id;
+    return `\n<EMBEDDED_ASSET:${id || "unknown"}>\n`;
+  }
+
+  if (node.nodeType === "entry-hyperlink") {
+    const id = node?.data?.target?.sys?.id;
+    return `<ENTRY_LINK:${id || "unknown"}>`;
+  }
+
+  if (Array.isArray(node.content)) {
+    const childText = node.content.map(richTextToStableDiffString).join("");
+
+    const blockNodes = new Set([
+      "paragraph",
+      "heading-1",
+      "heading-2",
+      "heading-3",
+      "heading-4",
+      "heading-5",
+      "heading-6",
+      "unordered-list",
+      "ordered-list",
+      "list-item",
+      "blockquote",
+      "hr",
+      "table",
+      "table-row",
+      "table-cell",
+      "document",
+    ]);
+
+    if (blockNodes.has(node.nodeType)) {
+      return childText.trim() ? `${childText.trim()}\n` : "";
+    }
+
+    return childText;
+  }
+
+  return "";
+}
+
+function RichTextDiffWithEmbeddedRefs({
+  side,
+  sourceStr,
+  targetStr,
+  embeddedChildren,
+  level,
+  spaceId,
+  environmentId,
+  selected,
+  onToggleField,
+  adoptAll,
+  overwriteAll,
+}) {
+  const viewStr = side === "source" ? sourceStr : targetStr;
+
+  let parts = splitStringByEmbeddedEntryTokens(viewStr);
+  parts = uniqueEmbeddedEntryParts(parts);
+
+  const cleanedSource = stripEmbeddedEntryTokens(sourceStr);
+  const cleanedTarget = stripEmbeddedEntryTokens(targetStr);
+
+  const diffHtml =
+    side === "source"
+      ? renderDiffHtmlSourceGreen(cleanedSource, cleanedTarget)
+      : renderDiffHtmlTargetRed(cleanedSource, cleanedTarget);
+
+  const embeddedIds = parts
+    .filter((p) => p.type === "embedded-entry")
+    .map((p) => p.id);
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {/* 1) The text diff */}
+      <div dangerouslySetInnerHTML={{ __html: diffHtml }} />
+
+      {/* 2) Embedded entries as link blocks */}
+      {embeddedIds.length > 0 ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          {embeddedIds.map((id) => {
+            const url = buildEntryUrl({
+              spaceId,
+              environmentId,
+              entryId: id,
+            });
+
+            return (
+              <div
+                key={id}
+                style={{
+                  padding: 8,
+                  border: "1px solid #eee",
+                  borderRadius: 6,
+                  background: "#fff",
+                  fontSize: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontFamily: "monospace" }}>
+                  {formatEmbeddedEntryLabel(id)}
+                </div>
+
+                {url ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      fontSize: 12,
+                      textDecoration: "none",
+                      border: "1px solid #ddd",
+                      padding: "4px 8px",
+                      borderRadius: 6,
+                      background: "#f7f7f7",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Open ↗
+                  </a>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
