@@ -46,7 +46,7 @@ export async function adoptEntryTree({
 
   // Fetch entry
   const entry = await callCMA(() =>
-    cma.entry.get({ entryId, environmentId, spaceId })
+    cma.entry.get({ entryId, environmentId, spaceId }),
   );
   summary.traversedEntries += 1;
 
@@ -62,7 +62,7 @@ export async function adoptEntryTree({
         contentTypeId: ctId,
         environmentId: envId,
         spaceId: spId,
-      })
+      }),
     );
     ctCache[ctId] = contentType;
   }
@@ -101,7 +101,7 @@ export async function adoptEntryTree({
           if (srcVal != null && !normalizedSrc) {
             console.warn(
               `[Locale Populator] Skipping invalid date for ${entryId}.${fieldId}.${sourceLocale}:`,
-              srcVal
+              srcVal,
             );
             continue;
           }
@@ -300,7 +300,7 @@ export async function adoptEntryTree({
       if (typeof srcVal === "string" && typeof tgtVal === "string") {
         const merged = mergeSourceAdditionsIntoTarget(
           srcVal || "",
-          tgtVal || ""
+          tgtVal || "",
         );
         if (merged !== tgtVal) {
           newFields[fieldId] = { ...localizedValues, [targetLocale]: merged };
@@ -345,19 +345,36 @@ export async function adoptEntryTree({
   // UPDATE ENTRY
   // ---------------------------------------------------------------------
   if (changed > 0) {
-    await callCMA(() =>
-      cma.entry.update(
-        {
-          entryId,
-          environmentId: envId,
-          spaceId: spId,
-          version: entry.sys.version,
-        },
-        { ...entry, fields: newFields }
-      )
-    );
-    summary.updatedEntries += 1;
-    summary.changedFields += changed;
+    try {
+      await callCMA(() =>
+        cma.entry.update(
+          {
+            entryId,
+            environmentId: envId,
+            spaceId: spId,
+            version: entry.sys.version,
+          },
+          { ...entry, fields: newFields },
+        ),
+      );
+      summary.updatedEntries += 1;
+      summary.changedFields += changed;
+    } catch (e) {
+      console.error("Error updating entry:", {
+        entryId,
+        environmentId: envId,
+        spaceId: spId,
+        expectedVersion: entry.sys.version,
+        status: e?.status,
+        code: e?.code,
+        sysId: e?.sys?.id,
+        name: e?.name,
+        message: e?.message,
+        details: e?.details,
+        fullError: e,
+      });
+      throw e;
+    }
   }
 
   // ---------------------------------------------------------------------
