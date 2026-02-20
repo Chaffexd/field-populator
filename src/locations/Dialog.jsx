@@ -123,7 +123,7 @@ const Dialog = () => {
           environmentId: sdk.ids.environment,
           spaceId: sdk.ids.space,
           query: { limit: 1000 },
-        })
+        }),
       );
       setLocales(localesRes.items);
       setLoading(false);
@@ -182,11 +182,12 @@ const Dialog = () => {
     locales,
   ]);
 
-  // Reset status when locales change
+  // Re-enable button when locale selection changes after a completed adoption
+  const adoptTargetsKey = adoptTargets.join(",");
   useEffect(() => {
-    setAdoptStatus("idle");
-    setAdoptMsg(null);
-  }, [sourceLocale, targetLocale]);
+    setAdoptStatus((prev) => (prev === "idle" ? prev : "idle"));
+    setAdoptMsg((prev) => (prev === null ? prev : null));
+  }, [sourceLocale, targetLocale, adoptTargetsKey, overwriteAll]);
 
   const onToggleField = (entryIdForField, fieldId, isChecked) => {
     // If adoptAll was true and user unticks even one → turn off adoptAll
@@ -233,7 +234,7 @@ const Dialog = () => {
         !needle
           ? true
           : (l.name || "").toLowerCase().includes(needle) ||
-            (l.code || "").toLowerCase().includes(needle)
+            (l.code || "").toLowerCase().includes(needle),
       );
   }, [locales, sourceLocale, adoptSearch]);
 
@@ -279,8 +280,8 @@ const Dialog = () => {
       adoptTargets.length > 0
         ? adoptTargets
         : targetLocale
-        ? [targetLocale]
-        : [];
+          ? [targetLocale]
+          : [];
 
     if (targets.length === 0) return;
 
@@ -311,7 +312,7 @@ const Dialog = () => {
           defaultLocale,
           selected,
           adoptAll,
-          overwriteAll
+          overwriteAll,
         });
 
         totalChangedFields += summary.changedFields;
@@ -322,7 +323,7 @@ const Dialog = () => {
       setAdoptMsg(
         `Adopted ${totalChangedFields} field${
           totalChangedFields === 1 ? "" : "s"
-        } across ${totalUpdatedEntries} entries (${targets.join(", ")}).`
+        } across ${totalUpdatedEntries} entries (${targets.join(", ")}).`,
       );
 
       // Refresh diff
@@ -352,7 +353,7 @@ const Dialog = () => {
       console.error(err);
       setAdoptMsg(
         { code: err.code, message: err.message } ||
-          "Adoption failed, please double check validation rules."
+          "Adoption failed, please double check validation rules.",
       );
       setAdoptStatus("error");
     } finally {
@@ -378,22 +379,28 @@ const Dialog = () => {
     adoptStatus === "running"
       ? "warning"
       : adoptStatus === "success"
-      ? "positive"
-      : adoptStatus === "error"
-      ? "negative"
-      : "primary";
+        ? "positive"
+        : adoptStatus === "error"
+          ? "negative"
+          : "primary";
 
   const noteTitle =
     adoptStatus === "running"
       ? "Adopting changes…"
       : adoptStatus === "success"
-      ? "Adoption complete"
-      : adoptStatus === "error"
-      ? "Adoption failed"
-      : "Do you wish to adopt these changes?";
+        ? "Adoption complete"
+        : adoptStatus === "error"
+          ? "Adoption failed"
+          : "Do you wish to adopt these changes?";
 
   return (
     <div>
+      <style>{`
+        @keyframes adoptProgress {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(350%); }
+        }
+      `}</style>
       {/* Locale Pickers */}
       <div
         style={{
@@ -417,7 +424,7 @@ const Dialog = () => {
               }
 
               setAdoptTargets((prev) =>
-                prev.filter((code) => isPairAllowed(v, code))
+                prev.filter((code) => isPairAllowed(v, code)),
               );
             }}
           >
@@ -577,16 +584,54 @@ const Dialog = () => {
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <Button
                     variant="positive"
-                    isLoading={adopting}
                     onClick={adoptChanges}
-                    disabled={
+                    isDisabled={
+                      adopting ||
                       !sourceLocale ||
-                      (!targetLocale && adoptTargets.length === 0)
+                      (!targetLocale && adoptTargets.length === 0) ||
+                      adoptStatus === "success"
                     }
                   >
-                    Adopt Source → Target
+                    {adopting ? (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Spinner size="small" />
+                        Adopting…
+                      </span>
+                    ) : adoptStatus === "success" ? (
+                      "Adopted ✓"
+                    ) : (
+                      "Adopt Source → Target"
+                    )}
                   </Button>
                   {adoptMsg && <span>{JSON.stringify(adoptMsg)}</span>}
+                  {adopting && (
+                    <div
+                      style={{
+                        display: "inline-block",
+                        width: 120,
+                        height: 6,
+                        background: "#e0e0e0",
+                        borderRadius: 3,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "40%",
+                          height: "100%",
+                          background: "#0059C8",
+                          borderRadius: 3,
+                          animation: "adoptProgress 1.2s ease-in-out infinite",
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </Note>
