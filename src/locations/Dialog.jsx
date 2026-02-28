@@ -30,12 +30,19 @@ const ALLOWED_BASES = new Set([
 
 function isPairAllowed(sourceCode, targetCode) {
   if (!sourceCode || !targetCode) return false;
+
   const srcBase = sourceCode.split("-")[0];
   const tgtBase = targetCode.split("-")[0];
+
   if (!ALLOWED_BASES.has(srcBase)) return false;
   if (srcBase !== tgtBase) return false;
 
-  return targetCode === sourceCode || targetCode.startsWith(`${srcBase}-`);
+  // ✅ Allow same exact locale OR base-only locale OR any region variant of the base
+  return (
+    targetCode === sourceCode ||
+    targetCode === srcBase ||
+    targetCode.startsWith(`${srcBase}-`)
+  );
 }
 
 // Flatten diffTree into a list of { entryId, fieldId } so we can build
@@ -276,6 +283,8 @@ const Dialog = () => {
   const adoptChanges = async () => {
     if (!sourceLocale) return;
 
+    const overallStart = performance.now();
+
     const targets =
       adoptTargets.length > 0
         ? adoptTargets
@@ -319,6 +328,13 @@ const Dialog = () => {
         totalUpdatedEntries += summary.updatedEntries;
         totalTraversed += summary.traversedEntries;
       }
+
+      const overallMs = performance.now() - overallStart;
+      console.log(
+        `[ADOPT TOTAL] ${targets.join(", ")} | ${totalTraversed} entries traversed | ` +
+          `${totalUpdatedEntries} entries updated | ${totalChangedFields} fields | ` +
+          `${(overallMs / 1000).toFixed(2)}s`,
+      );
 
       setAdoptMsg(
         `Adopted ${totalChangedFields} field${

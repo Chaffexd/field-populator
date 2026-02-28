@@ -5,7 +5,7 @@ function sleep(ms) {
 }
 
 // Create a limiter that ensures <= maxPerSecond
-export function createRateLimiter({ maxPerSecond = 8, jitterMs = 20 } = {}) {
+export function createRateLimiter({ maxPerSecond = 50, jitterMs = 20 } = {}) {
   const calls = [];
   const windowMs = 1000;
   const minInterval = Math.ceil(windowMs / maxPerSecond);
@@ -30,13 +30,16 @@ export function createRateLimiter({ maxPerSecond = 8, jitterMs = 20 } = {}) {
 }
 
 // Singleton limiter (tune to be safely under 10 req/s)
-export const throttle = createRateLimiter({ maxPerSecond: 8, jitterMs: 25 });
+export const throttle = createRateLimiter({ maxPerSecond: 50, jitterMs: 25 });
 
 // Wrap a CMA call with rate limit + retry on 429
+let inflight = 0;
 export async function callCMA(fn, { retries = 4, baseDelay = 300 } = {}) {
+  console.log("Inflight CMA calls:", inflight);
   let attempt = 0;
   for (;;) {
     await throttle();
+    inflight++;
     try {
       return await fn();
     } catch (e) {
@@ -48,6 +51,9 @@ export async function callCMA(fn, { retries = 4, baseDelay = 300 } = {}) {
         baseDelay * Math.pow(2, attempt) + Math.floor(Math.random() * 100);
       await sleep(wait);
       attempt++;
+    } finally {
+      inflight--;
+      if (inflight % 10 === 0) console.log("inflight", inflight);
     }
   }
 }

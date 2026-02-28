@@ -4,13 +4,15 @@ import { mergeRichTextDocuments } from "./mergeRichText";
 import { normalizeContentfulDate } from "./helpers";
 
 /**
- * Recursively adopt localized changes from sourceLocale -> targetLocale
- * for an entry and all referenced entries (following entry links).
+ * Fast + safe adoption with bounded concurrency (no recursion explosion).
  *
- * Insert-only strategy:
- * ✅ If target locale already has content → perform insert-only merge
- * ✅ If target locale is empty → full adopt (copy src → tgt)
+ * - Uses a worker queue instead of recursive await
+ * - Hard caps concurrency to MAX_WORKERS (default 50)
+ * - Avoids duplicates via `scheduled` set
+ * - Handles cycles safely (no deadlocks)
  */
+
+const MAX_WORKERS = 50;
 
 function isRichText(val) {
   return (
@@ -21,7 +23,52 @@ function isRichText(val) {
   );
 }
 
-export async function adoptEntryTree({
+const clone = (v) => JSON.parse(JSON.stringify(v));
+
+/**
+ * Tiny async queue that supports multiple workers.
+ */
+class AsyncQueue {
+  constructor() {
+    this.items = [];
+    this.waiters = [];
+    this.closed = false;
+  }
+
+  push(item) {
+    if (this.closed) return;
+    if (this.waiters.length) {
+      const resolve = this.waiters.shift();
+      resolve(item);
+      return;
+    }
+    this.items.push(item);
+  }
+
+  async shift() {
+    if (this.items.length) return this.items.shift();
+    if (this.closed) return null;
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  close() {
+    this.closed = true;
+    while (this.waiters.length) {
+      const resolve = this.waiters.shift();
+      resolve(null);
+    }
+  }
+}
+
+/**
+ * Process a single entry:
+ * - fetch entry
+ * - fetch content type (cached)
+ * - compute field updates
+ * - update entry if changed
+ * - return referenced entryIds to traverse next
+ */
+async function processOneEntry({
   cma,
   entryId,
   environmentId,
@@ -29,22 +76,14 @@ export async function adoptEntryTree({
   sourceLocale,
   targetLocale,
   defaultLocale,
-  visited = new Set(),
-  ctCache = {},
-  selected = {},
-  adoptAll = false,
-  overwriteAll = false,
+  ctCache,
+  selected,
+  adoptAll,
+  overwriteAll,
 }) {
-  const summary = {
-    updatedEntries: 0,
-    changedFields: 0,
-    traversedEntries: 0,
-  };
+  const summary = { updatedEntries: 0, changedFields: 0, traversedEntries: 0 };
+  const refIds = new Set();
 
-  if (!entryId || visited.has(entryId)) return summary;
-  visited.add(entryId);
-
-  // Fetch entry
   const entry = await callCMA(() =>
     cma.entry.get({ entryId, environmentId, spaceId }),
   );
@@ -53,7 +92,6 @@ export async function adoptEntryTree({
   const envId = entry.sys.environment.sys.id;
   const spId = entry.sys.space.sys.id;
 
-  // Fetch content type & cache
   const ctId = entry?.sys?.contentType?.sys?.id;
   let contentType = ctCache[ctId];
   if (!contentType) {
@@ -67,85 +105,26 @@ export async function adoptEntryTree({
     ctCache[ctId] = contentType;
   }
 
-  const allowedForThisEntry = selected[entryId] || new Set();
-
-  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const allowedForThisEntry = selected?.[entryId] || new Set();
 
   const fields = entry.fields || {};
   const newFields = { ...fields };
   let changed = 0;
 
-  const refIds = new Set();
-
   for (const def of contentType.fields || []) {
     const fieldId = def.id;
-    const fieldDef = def;
     const localizedValues = fields[fieldId];
-
     if (!localizedValues) continue;
 
     // ---------------------------------------------------------------------
     // SINGLE ENTRY LINK
     // ---------------------------------------------------------------------
-    if (fieldDef.type === "Link" && fieldDef.linkType === "Entry") {
-      if (fieldDef.localized) {
+    if (def.type === "Link" && def.linkType === "Entry") {
+      if (def.localized) {
         const srcLink = localizedValues?.[sourceLocale];
         const tgtLink = localizedValues?.[targetLocale];
 
-        // ✅ Date fields: validate before writing to Contentful
-        if (fieldDef.type === "Date") {
-          const normalizedSrc = normalizeContentfulDate(srcVal);
-          const normalizedTgt = normalizeContentfulDate(tgtVal);
-
-          // If src is invalid, skip adopting this field entirely
-          if (srcVal != null && !normalizedSrc) {
-            console.warn(
-              `[Locale Populator] Skipping invalid date for ${entryId}.${fieldId}.${sourceLocale}:`,
-              srcVal,
-            );
-            continue;
-          }
-
-          // Overwrite mode
-          if (overwriteAll) {
-            if (normalizedSrc !== undefined) {
-              newFields[fieldId] = {
-                ...localizedValues,
-                [targetLocale]: normalizedSrc,
-              };
-              changed++;
-            }
-            continue;
-          }
-
-          // Full adopt if empty
-          if (tgtVal === undefined || tgtVal === null) {
-            if (normalizedSrc !== undefined) {
-              newFields[fieldId] = {
-                ...localizedValues,
-                [targetLocale]: normalizedSrc,
-              };
-              changed++;
-            }
-            continue;
-          }
-
-          // Only update if different
-          if (
-            normalizedSrc !== undefined &&
-            normalizedSrc !== normalizedTgt &&
-            (adoptAll || allowedForThisEntry.has(fieldId))
-          ) {
-            newFields[fieldId] = {
-              ...localizedValues,
-              [targetLocale]: normalizedSrc,
-            };
-            changed++;
-          }
-
-          continue;
-        }
-
+        // overwrite
         if (overwriteAll && srcLink !== undefined) {
           newFields[fieldId] = {
             ...localizedValues,
@@ -153,7 +132,7 @@ export async function adoptEntryTree({
           };
           changed++;
         } else {
-          // Full adopt if target empty
+          // full adopt if empty
           if (
             (tgtLink === undefined || tgtLink === null) &&
             srcLink &&
@@ -166,7 +145,7 @@ export async function adoptEntryTree({
             changed++;
           }
 
-          // Insert-only (target has something)
+          // insert-only overwrite if different
           if (
             (adoptAll || allowedForThisEntry.has(fieldId)) &&
             srcLink &&
@@ -180,10 +159,11 @@ export async function adoptEntryTree({
             changed++;
           }
         }
+
         const refId = srcLink?.sys?.id || tgtLink?.sys?.id;
         if (refId) refIds.add(refId);
       } else {
-        // Non-localized link: only traverse
+        // non-localized link: traverse only
         const linkVal =
           localizedValues?.[defaultLocale] ??
           Object.values(localizedValues || {})[0];
@@ -198,11 +178,11 @@ export async function adoptEntryTree({
     // ARRAY OF ENTRY LINKS
     // ---------------------------------------------------------------------
     if (
-      fieldDef.type === "Array" &&
-      fieldDef.items?.type === "Link" &&
-      fieldDef.items?.linkType === "Entry"
+      def.type === "Array" &&
+      def.items?.type === "Link" &&
+      def.items?.linkType === "Entry"
     ) {
-      if (fieldDef.localized) {
+      if (def.localized) {
         const srcArr = localizedValues?.[sourceLocale];
         const tgtArr = localizedValues?.[targetLocale];
 
@@ -213,7 +193,7 @@ export async function adoptEntryTree({
           };
           changed++;
         } else {
-          // Full adopt if empty
+          // full adopt if empty
           if (
             (tgtArr === undefined || tgtArr === null) &&
             srcArr &&
@@ -226,7 +206,7 @@ export async function adoptEntryTree({
             changed++;
           }
 
-          // Insert-only if target has content
+          // insert-only if different
           if (
             (adoptAll || allowedForThisEntry.has(fieldId)) &&
             Array.isArray(srcArr) &&
@@ -254,6 +234,7 @@ export async function adoptEntryTree({
         const arr =
           localizedValues?.[defaultLocale] ??
           Object.values(localizedValues || {})[0];
+
         (Array.isArray(arr) ? arr : []).forEach((l) => {
           const id = l?.sys?.id;
           if (id) refIds.add(id);
@@ -263,89 +244,136 @@ export async function adoptEntryTree({
     }
 
     // ---------------------------------------------------------------------
-    // LOCALIZED SCALARS / STRINGS / RICH TEXT
+    // LOCALIZED SCALARS / STRINGS / RICH TEXT / DATE
     // ---------------------------------------------------------------------
-    if (fieldDef.localized) {
-      if (!overwriteAll && !adoptAll && !allowedForThisEntry.has(fieldId))
-        continue;
+    if (!def.localized) continue;
 
-      const srcVal = localizedValues?.[sourceLocale];
-      const tgtVal = localizedValues?.[targetLocale];
+    if (!overwriteAll && !adoptAll && !allowedForThisEntry.has(fieldId)) {
+      continue;
+    }
 
-      // OVERWRITE MODE — replace target with source
-      if (overwriteAll) {
-        if (srcVal !== undefined) {
-          newFields[fieldId] = {
-            ...localizedValues,
-            [targetLocale]: clone(srcVal),
-          };
-          changed++;
-        }
-        continue;
-      }
+    const srcVal = localizedValues?.[sourceLocale];
+    const tgtVal = localizedValues?.[targetLocale];
 
-      // FULL ADOPT IF TARGET EMPTY
-      if (tgtVal === undefined || tgtVal === null) {
-        if (srcVal !== undefined) {
-          newFields[fieldId] = {
-            ...localizedValues,
-            [targetLocale]: clone(srcVal),
-          };
-          changed++;
-        }
-        continue;
-      }
+    // Date fields: normalize + validate before writing
+    if (def.type === "Date") {
+      const normalizedSrc = normalizeContentfulDate(srcVal);
+      const normalizedTgt = normalizeContentfulDate(tgtVal);
 
-      // ✅ STRING MERGE (Option B)
-      if (typeof srcVal === "string" && typeof tgtVal === "string") {
-        const merged = mergeSourceAdditionsIntoTarget(
-          srcVal || "",
-          tgtVal || "",
+      // If src is invalid, skip
+      if (srcVal != null && !normalizedSrc) {
+        console.warn(
+          `[Locale Populator] Skipping invalid date for ${entryId}.${fieldId}.${sourceLocale}:`,
+          srcVal,
         );
-        if (merged !== tgtVal) {
-          newFields[fieldId] = { ...localizedValues, [targetLocale]: merged };
-          changed++;
-        }
         continue;
       }
 
-      // ✅ RICH TEXT MERGE
-      if (isRichText(srcVal) && isRichText(tgtVal)) {
-        const mergedDoc = mergeRichTextDocuments(srcVal, tgtVal);
-        if (JSON.stringify(mergedDoc) !== JSON.stringify(tgtVal)) {
+      if (overwriteAll) {
+        if (normalizedSrc !== undefined) {
           newFields[fieldId] = {
             ...localizedValues,
-            [targetLocale]: mergedDoc,
+            [targetLocale]: normalizedSrc,
           };
           changed++;
         }
         continue;
       }
 
-      // If one is rich text and the other isn't → skip (insert-only)
-      if (isRichText(srcVal) && !isRichText(tgtVal)) {
+      // full adopt if empty
+      if (tgtVal === undefined || tgtVal === null) {
+        if (normalizedSrc !== undefined) {
+          newFields[fieldId] = {
+            ...localizedValues,
+            [targetLocale]: normalizedSrc,
+          };
+          changed++;
+        }
         continue;
       }
 
-      // ✅ Fallback: deep copy if changed (JSON, arrays, numbers)
+      // update if different
       if (
-        srcVal !== undefined &&
-        JSON.stringify(srcVal) !== JSON.stringify(tgtVal)
+        normalizedSrc !== undefined &&
+        normalizedSrc !== normalizedTgt &&
+        (adoptAll || allowedForThisEntry.has(fieldId))
       ) {
+        newFields[fieldId] = {
+          ...localizedValues,
+          [targetLocale]: normalizedSrc,
+        };
+        changed++;
+      }
+      continue;
+    }
+
+    // OVERWRITE MODE — replace target with source
+    if (overwriteAll) {
+      if (srcVal !== undefined) {
         newFields[fieldId] = {
           ...localizedValues,
           [targetLocale]: clone(srcVal),
         };
         changed++;
       }
+      continue;
+    }
+
+    // FULL ADOPT IF TARGET EMPTY
+    if (tgtVal === undefined || tgtVal === null) {
+      if (srcVal !== undefined) {
+        newFields[fieldId] = {
+          ...localizedValues,
+          [targetLocale]: clone(srcVal),
+        };
+        changed++;
+      }
+      continue;
+    }
+
+    // STRING MERGE (insert-only)
+    if (typeof srcVal === "string" && typeof tgtVal === "string") {
+      const merged = mergeSourceAdditionsIntoTarget(srcVal || "", tgtVal || "");
+      if (merged !== tgtVal) {
+        newFields[fieldId] = { ...localizedValues, [targetLocale]: merged };
+        changed++;
+      }
+      continue;
+    }
+
+    // RICH TEXT MERGE
+    if (isRichText(srcVal) && isRichText(tgtVal)) {
+      const mergedDoc = mergeRichTextDocuments(srcVal, tgtVal);
+      if (JSON.stringify(mergedDoc) !== JSON.stringify(tgtVal)) {
+        newFields[fieldId] = {
+          ...localizedValues,
+          [targetLocale]: mergedDoc,
+        };
+        changed++;
+      }
+      continue;
+    }
+
+    // If one is rich text and the other isn't → skip (insert-only)
+    if (isRichText(srcVal) && !isRichText(tgtVal)) continue;
+
+    // Fallback: deep copy if changed
+    if (
+      srcVal !== undefined &&
+      JSON.stringify(srcVal) !== JSON.stringify(tgtVal)
+    ) {
+      newFields[fieldId] = {
+        ...localizedValues,
+        [targetLocale]: clone(srcVal),
+      };
+      changed++;
     }
   }
 
-  // ---------------------------------------------------------------------
   // UPDATE ENTRY
-  // ---------------------------------------------------------------------
   if (changed > 0) {
     try {
+      const start = performance.now();
       await callCMA(() =>
         cma.entry.update(
           {
@@ -357,6 +385,10 @@ export async function adoptEntryTree({
           { ...entry, fields: newFields },
         ),
       );
+
+      const duration = performance.now() - start;
+
+      console.log(`[UPDATE] ${entryId} | ${duration.toFixed(1)} ms`);
       summary.updatedEntries += 1;
       summary.changedFields += changed;
     } catch (e) {
@@ -377,29 +409,87 @@ export async function adoptEntryTree({
     }
   }
 
-  // ---------------------------------------------------------------------
-  // RECURSE INTO CHILD ENTRIES
-  // ---------------------------------------------------------------------
-  for (const childId of refIds) {
-    const s = await adoptEntryTree({
-      cma,
-      entryId: childId,
-      environmentId: envId,
-      spaceId: spId,
-      sourceLocale,
-      targetLocale,
-      defaultLocale,
-      visited,
-      ctCache,
-      selected,
-      adoptAll,
-      overwriteAll,
-    });
+  return { summary, refIds, envId, spId };
+}
 
-    summary.updatedEntries += s.updatedEntries;
-    summary.changedFields += s.changedFields;
-    summary.traversedEntries += s.traversedEntries;
-  }
+/**
+ * PUBLIC API (same name/signature):
+ * Traverses the entry graph concurrently with a hard cap (50).
+ */
+export async function adoptEntryTree({
+  cma,
+  entryId,
+  environmentId,
+  spaceId,
+  sourceLocale,
+  targetLocale,
+  defaultLocale,
+  visited = new Set(),
+  ctCache = {},
+  selected = {},
+  adoptAll = false,
+  overwriteAll = false,
+}) {
+  const total = { updatedEntries: 0, changedFields: 0, traversedEntries: 0 };
 
-  return summary;
+  if (!entryId) return total;
+
+  // scheduled prevents duplicates + prevents cycles from causing deadlocks
+  const scheduled = visited; // reuse your existing visited set
+
+  const q = new AsyncQueue();
+  let pending = 0;
+
+  const enqueue = (id) => {
+    if (!id) return;
+    if (scheduled.has(id)) return;
+    scheduled.add(id);
+    pending++;
+    q.push(id);
+  };
+
+  enqueue(entryId);
+
+  const worker = async () => {
+    for (;;) {
+      const id = await q.shift();
+      if (id === null) return;
+
+      try {
+        const { summary, refIds, envId, spId } = await processOneEntry({
+          cma,
+          entryId: id,
+          environmentId,
+          spaceId,
+          sourceLocale,
+          targetLocale,
+          defaultLocale,
+          ctCache,
+          selected,
+          adoptAll,
+          overwriteAll,
+        });
+
+        total.updatedEntries += summary.updatedEntries;
+        total.changedFields += summary.changedFields;
+        total.traversedEntries += summary.traversedEntries;
+
+        // enqueue children
+        for (const childId of refIds) enqueue(childId);
+
+        // keep env/space consistent after first hop (optional)
+        environmentId = envId ?? environmentId;
+        spaceId = spId ?? spaceId;
+      } finally {
+        pending--;
+        if (pending === 0) q.close();
+      }
+    }
+  };
+
+  // Start exactly MAX_WORKERS workers (hard cap)
+  const workers = Array.from({ length: MAX_WORKERS }, () => worker());
+  await Promise.all(workers);
+
+  return total;
 }
