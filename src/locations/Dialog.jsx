@@ -367,10 +367,46 @@ const Dialog = () => {
       setAdoptStatus("success");
     } catch (err) {
       console.error(err);
-      setAdoptMsg(
-        { code: err.code, message: err.message } ||
-          "Adoption failed, please double check validation rules.",
-      );
+      const BASE =
+        "Adoption failed. Please double check validation rules.\n" +
+        "If reporting this issue, include the requestId below.";
+
+      function formatAdoptError(err) {
+        // 1) Try to interpret err.message as JSON (Contentful SDK often puts JSON in message)
+        const rawMsg =
+          typeof err?.message === "string" ? err.message.trim() : "";
+        let parsed = null;
+
+        if (rawMsg.startsWith("{") && rawMsg.endsWith("}")) {
+          try {
+            parsed = JSON.parse(rawMsg);
+          } catch {
+            // not JSON, ignore
+          }
+        }
+
+        // 2) Prefer parsed.details.errors[].message if available
+        const errors =
+          parsed?.details?.errors?.map((e) => e?.message).filter(Boolean) ??
+          err?.details?.errors?.map((e) => e?.message).filter(Boolean) ??
+          [];
+
+        // Deduplicate (you have the same message repeated)
+        const uniqueErrors = Array.from(new Set(errors));
+
+        const messagesBlock =
+          uniqueErrors.length > 0
+            ? uniqueErrors.map((m) => `• ${m}`).join("\n")
+            : parsed?.message || rawMsg || "Unknown error";
+
+        const requestId = parsed?.requestId || err?.requestId;
+        const requestIdBlock = requestId ? `\n\nRequest ID: ${requestId}` : "";
+
+        return `${BASE}\n\n${messagesBlock}${requestIdBlock}`;
+      }
+
+      // usage
+      setAdoptMsg(formatAdoptError(err));
       setAdoptStatus("error");
     } finally {
       setAdopting(false);
@@ -483,7 +519,8 @@ const Dialog = () => {
             variant="negative"
             title="Unable to compare - please ensure all references are accessible."
           >
-            {error}
+            If you wish to report this, please take the requestId at the end of
+            the error message. {error}
           </Note>
         </div>
       )}
@@ -625,7 +662,13 @@ const Dialog = () => {
                       "Adopt Source → Target"
                     )}
                   </Button>
-                  {adoptMsg && <span>{JSON.stringify(adoptMsg)}</span>}
+                  {adoptMsg && (
+                    <Note variant={noteVariant} title={noteTitle}>
+                      <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                        {adoptMsg}
+                      </pre>
+                    </Note>
+                  )}
                   {adopting && (
                     <div
                       style={{
