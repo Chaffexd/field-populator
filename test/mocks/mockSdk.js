@@ -7,8 +7,17 @@ const mockSdk = {
     setReady: vi.fn(),
     getCurrentState: vi.fn(),
   },
+  window: {
+    startAutoResizer: vi.fn(),
+  },
+  dialogs: {
+    openCurrent: vi.fn(),
+  },
   ids: {
     app: 'test-app',
+    entry: 'test-entry',
+    environment: 'master',
+    space: 'vvbytozt5evi',
   },
 };
 
