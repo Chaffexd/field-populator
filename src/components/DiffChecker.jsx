@@ -131,7 +131,7 @@ function LTagRenderer({
             disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
-          {checked ? "Adopt this field" : "Do not adopt this field"}
+          {checked ? "Merge this field" : "Do not merge this field"}
         </label>
       </div>
 
@@ -253,7 +253,7 @@ function TagRenderer({
             disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
-          {checked ? "Adopt this field" : "Do not adopt this field"}
+          {checked ? "Merge this field" : "Do not merge this field"}
         </label>
       </div>
 
@@ -716,7 +716,7 @@ function FrontendTagsRenderer({
             disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
-          {checked ? "Adopt this field" : "Do not adopt this field"}
+          {checked ? "Merge this field" : "Do not merge this field"}
         </label>
       </div>
 
@@ -893,7 +893,7 @@ function RelatedProductPortfolioRenderer({
             disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
-          {checked ? "Adopt this field" : "Do not adopt this field"}
+          {checked ? "Merge this field" : "Do not merge this field"}
         </label>
       </div>
 
@@ -1088,7 +1088,7 @@ function MainImageAssetRenderer({
             disabled={overwriteAll}
             onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
           />
-          {checked ? "Adopt this field" : "Do not adopt this field"}
+          {checked ? "Merge this field" : "Do not merge this field"}
         </label>
       </div>
 
@@ -1680,8 +1680,8 @@ function NodeRenderer({
               }
             />
             {adoptAll || selected?.[entryId]?.has(fieldKey)
-              ? "Adopt this field"
-              : "Do not adopt this field"}
+              ? "Merge this field"
+              : "Do not merge this field"}
           </label>
         </div>
 
@@ -1922,7 +1922,7 @@ function NodeRenderer({
                 onToggleField(entryId, fieldKey, e.target.checked)
               }
             />
-            {checked ? "Adopt this field" : "Do not adopt this field"}
+            {checked ? "Merge this field" : "Do not merges this field"}
           </label>
         </div>
 
