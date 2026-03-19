@@ -113,7 +113,45 @@ const Dialog = () => {
   const [adoptMsg, setAdoptMsg] = useState(null);
   const [adoptSearch, setAdoptSearch] = useState("");
   const [selectAllLocales, setSelectAllLocales] = useState(false);
+  const [selectAllGlobalEn, setSelectAllGlobalEn] = useState(false);
   const SELECT_ALL_VALUE = "__SELECT_ALL_LOCALES__";
+  const SELECT_ALL_GLOBAL_EN_VALUE = "__SELECT_ALL_GLOBAL_EN__";
+
+  const GLOBAL_EN_LOCALES = new Set([
+    "en-US",
+    "en-SG",
+    "en-KE",
+    "en-ZA",
+    "en-GH",
+    "en-NO",
+    "en-NG",
+    "en-PH",
+    "en-PK",
+    "en-IN",
+    "en-ID",
+    "en-HK",
+    "en-TH",
+    "en-VN",
+    "en-SE",
+    "en-GR",
+    "en-IL",
+    "en-FI",
+    "en-DK",
+    "en-AU",
+    "en-NZ",
+    "en-GB",
+    "en-IE",
+    "en-MY",
+    "en-BG",
+    "en-CZ",
+    "en-HU",
+    "en-TR",
+    "en-HR",
+    "en-SK",
+    "en-RS",
+    "en-RO",
+    "en-TW",
+  ]);
 
   // Invocation
   const params = sdk.parameters.invocation;
@@ -245,6 +283,34 @@ const Dialog = () => {
       );
   }, [locales, sourceLocale, adoptSearch]);
 
+  const globalEnAdoptLocales = useMemo(() => {
+    return (locales || [])
+      .filter((l) => l.code !== sourceLocale)
+      .filter((l) => isPairAllowed(sourceLocale, l.code))
+      .filter((l) => GLOBAL_EN_LOCALES.has(l.code));
+  }, [locales, sourceLocale]);
+
+  useEffect(() => {
+    console.log("==== GLOBAL EN DEBUG ====");
+    console.log("Source locale:", sourceLocale);
+
+    console.log(
+      "All locales:",
+      locales.map((l) => l.code),
+    );
+
+    console.log("Global EN allowed list:", Array.from(GLOBAL_EN_LOCALES));
+
+    console.log(
+      "Computed Global EN locales:",
+      globalEnAdoptLocales.map((l) => l.code),
+    );
+
+    console.log("Count:", globalEnAdoptLocales.length);
+
+    console.log("==== END DEBUG ====");
+  }, [globalEnAdoptLocales, locales, sourceLocale]);
+
   const handleAdoptSearchValueChange = (e) => {
     setAdoptSearch(e.target.value);
   };
@@ -252,13 +318,27 @@ const Dialog = () => {
   const handleSelectAdoptItem = (e) => {
     const { checked, value } = e.target;
 
-    // 🔥 Special case: Select All
+    // Select all eligible locales
     if (value === SELECT_ALL_VALUE) {
       if (checked) {
         setSelectAllLocales(true);
+        setSelectAllGlobalEn(false);
         setAdoptTargets(filteredAdoptLocales.map((l) => l.code));
       } else {
         setSelectAllLocales(false);
+        setAdoptTargets([]);
+      }
+      return;
+    }
+
+    // Select all Global EN locales
+    if (value === SELECT_ALL_GLOBAL_EN_VALUE) {
+      if (checked) {
+        setSelectAllGlobalEn(true);
+        setSelectAllLocales(false);
+        setAdoptTargets(globalEnAdoptLocales.map((l) => l.code));
+      } else {
+        setSelectAllGlobalEn(false);
         setAdoptTargets([]);
       }
       return;
@@ -270,10 +350,9 @@ const Dialog = () => {
         ? Array.from(new Set([...prev, value]))
         : prev.filter((v) => v !== value);
 
-      // Manual change disables select-all
-      if (selectAllLocales) {
-        setSelectAllLocales(false);
-      }
+      // Manual changes disable synthetic selections
+      if (selectAllLocales) setSelectAllLocales(false);
+      if (selectAllGlobalEn) setSelectAllGlobalEn(false);
 
       return next;
     });
@@ -478,6 +557,8 @@ const Dialog = () => {
               setAdoptTargets((prev) =>
                 prev.filter((code) => isPairAllowed(v, code)),
               );
+              setSelectAllLocales(false);
+              setSelectAllGlobalEn(false);
             }}
           >
             <Select.Option value="">-- Select source locale --</Select.Option>
@@ -592,7 +673,6 @@ const Dialog = () => {
                     popoverProps={{ isFullWidth: true }}
                     currentSelection={adoptTargets}
                   >
-                    {/* 🔥 Select all option INSIDE the list */}
                     <Multiselect.Option
                       key="select-all-locales"
                       value={SELECT_ALL_VALUE}
@@ -603,6 +683,19 @@ const Dialog = () => {
                         selectAllLocales &&
                         adoptTargets.length === filteredAdoptLocales.length &&
                         filteredAdoptLocales.length > 0
+                      }
+                    />
+
+                    <Multiselect.Option
+                      key="select-all-global-en"
+                      value={SELECT_ALL_GLOBAL_EN_VALUE}
+                      label={`Select all Global EN (${globalEnAdoptLocales.length})`}
+                      onSelectItem={handleSelectAdoptItem}
+                      itemId="select-all-global-en"
+                      isChecked={
+                        selectAllGlobalEn &&
+                        adoptTargets.length === globalEnAdoptLocales.length &&
+                        globalEnAdoptLocales.length > 0
                       }
                     />
 
