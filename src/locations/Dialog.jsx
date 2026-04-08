@@ -28,6 +28,63 @@ const ALLOWED_BASES = new Set([
   "jp",
 ]);
 
+const GLOBAL_EN_LOCALES = new Set([
+  "en-AU",
+  "en-BH",
+  "en-BG",
+  "en-HR",
+  "en-CZ",
+  "en-DK",
+  "en-EG",
+  "en-FI",
+  "en-GH",
+  "en-GR",
+  "en-HK",
+  "en-HU",
+  "en-IN",
+  "en-ID",
+  "en-IQ",
+  "en-IL",
+  "en-JO",
+  "en-KE",
+  "en-KW",
+  "en-LB",
+  "en-NZ",
+  "en-NG",
+  "en-NO",
+  "en-OM",
+  "en-PK",
+  "en-PH",
+  "en-QA",
+  "en-RO",
+  "en-SA",
+  "en-RS",
+  "en-SG",
+  "en-SK",
+  "en-ZA",
+  "en-SE",
+  "en-TW",
+  "en-TH",
+  "en-TR",
+  "en-AE",
+  "en-VN",
+]);
+
+function formatDuration(ms) {
+  if (!ms || ms < 0) return "0s";
+
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds}s`;
+}
+
+const ESTIMATED_MS_PER_LOCALE = 12000; // 12s per locale to start with
+const BASE_OVERHEAD_MS = 3000; // 3s fixed setup overhead
+const MANUAL_MS_PER_LOCALE = 90000; // assume 1.5 mins manual work per locale
+
 function isPairAllowed(sourceCode, targetCode) {
   if (!sourceCode || !targetCode) return false;
 
@@ -117,41 +174,22 @@ const Dialog = () => {
   const SELECT_ALL_VALUE = "__SELECT_ALL_LOCALES__";
   const SELECT_ALL_GLOBAL_EN_VALUE = "__SELECT_ALL_GLOBAL_EN__";
 
-  const GLOBAL_EN_LOCALES = new Set([
-    "en-US",
-    "en-SG",
-    "en-KE",
-    "en-ZA",
-    "en-GH",
-    "en-NO",
-    "en-NG",
-    "en-PH",
-    "en-PK",
-    "en-IN",
-    "en-ID",
-    "en-HK",
-    "en-TH",
-    "en-VN",
-    "en-SE",
-    "en-GR",
-    "en-IL",
-    "en-FI",
-    "en-DK",
-    "en-AU",
-    "en-NZ",
-    "en-GB",
-    "en-IE",
-    "en-MY",
-    "en-BG",
-    "en-CZ",
-    "en-HU",
-    "en-TR",
-    "en-HR",
-    "en-SK",
-    "en-RS",
-    "en-RO",
-    "en-TW",
-  ]);
+  // Performance state
+  const [adoptStartedAt, setAdoptStartedAt] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [estimatedTotalMs, setEstimatedTotalMs] = useState(null);
+  const [actualDurationMs, setActualDurationMs] = useState(null);
+  const [savedMs, setSavedMs] = useState(null);
+
+  useEffect(() => {
+    if (!adopting || !adoptStartedAt) return;
+
+    const id = setInterval(() => {
+      setElapsedMs(performance.now() - adoptStartedAt);
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [adopting, adoptStartedAt]);
 
   // Invocation
   const params = sdk.parameters.invocation;
@@ -373,6 +411,15 @@ const Dialog = () => {
 
     if (targets.length === 0) return;
 
+    const estimatedMs =
+      BASE_OVERHEAD_MS + targets.length * ESTIMATED_MS_PER_LOCALE;
+
+    setAdoptStartedAt(performance.now());
+    setElapsedMs(0);
+    setEstimatedTotalMs(estimatedMs);
+    setActualDurationMs(null);
+    setSavedMs(null);
+
     setAdoptMsg(null);
     setAdopting(true);
     setAdoptStatus("running");
@@ -409,6 +456,13 @@ const Dialog = () => {
       }
 
       const overallMs = performance.now() - overallStart;
+
+      setActualDurationMs(overallMs);
+
+      const estimatedManualMs = targets.length * MANUAL_MS_PER_LOCALE;
+      const saved = Math.max(0, estimatedManualMs - overallMs);
+      setSavedMs(saved);
+
       console.log(
         `[ADOPT TOTAL] ${targets.join(", ")} | ${totalTraversed} entries traversed | ` +
           `${totalUpdatedEntries} entries updated | ${totalChangedFields} fields | ` +
@@ -489,6 +543,7 @@ const Dialog = () => {
       setAdoptStatus("error");
     } finally {
       setAdopting(false);
+      setAdoptStartedAt(null);
     }
   };
 
@@ -523,6 +578,9 @@ const Dialog = () => {
         : adoptStatus === "error"
           ? "Adoption failed"
           : "Do you wish to adopt these changes?";
+
+  const remainingMs =
+    estimatedTotalMs != null ? Math.max(0, estimatedTotalMs - elapsedMs) : null;
 
   return (
     <div>
@@ -674,19 +732,6 @@ const Dialog = () => {
                     currentSelection={adoptTargets}
                   >
                     <Multiselect.Option
-                      key="select-all-locales"
-                      value={SELECT_ALL_VALUE}
-                      label={`Select all eligible locales (${filteredAdoptLocales.length})`}
-                      onSelectItem={handleSelectAdoptItem}
-                      itemId="select-all-locales"
-                      isChecked={
-                        selectAllLocales &&
-                        adoptTargets.length === filteredAdoptLocales.length &&
-                        filteredAdoptLocales.length > 0
-                      }
-                    />
-
-                    <Multiselect.Option
                       key="select-all-global-en"
                       value={SELECT_ALL_GLOBAL_EN_VALUE}
                       label={`Select all Global EN (${globalEnAdoptLocales.length})`}
@@ -727,62 +772,96 @@ const Dialog = () => {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <Button
-                    variant="positive"
-                    onClick={adoptChanges}
-                    isDisabled={
-                      adopting ||
-                      !sourceLocale ||
-                      (!targetLocale && adoptTargets.length === 0) ||
-                      adoptStatus === "success"
-                    }
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
+                >
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 12 }}
                   >
-                    {adopting ? (
-                      <span
+                    <Button
+                      variant="positive"
+                      onClick={adoptChanges}
+                      isDisabled={
+                        adopting ||
+                        !sourceLocale ||
+                        (!targetLocale && adoptTargets.length === 0) ||
+                        adoptStatus === "success"
+                      }
+                    >
+                      {adopting ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <Spinner size="small" />
+                          Adopting…
+                        </span>
+                      ) : adoptStatus === "success" ? (
+                        "Adopted ✓"
+                      ) : (
+                        "Adopt Source → Target"
+                      )}
+                    </Button>
+
+                    {adopting && (
+                      <div
                         style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 8,
+                          display: "inline-block",
+                          width: 120,
+                          height: 6,
+                          background: "#e0e0e0",
+                          borderRadius: 3,
+                          overflow: "hidden",
                         }}
                       >
-                        <Spinner size="small" />
-                        Adopting…
-                      </span>
-                    ) : adoptStatus === "success" ? (
-                      "Adopted ✓"
-                    ) : (
-                      "Adopt Source → Target"
+                        <div
+                          style={{
+                            width: "40%",
+                            height: "100%",
+                            background: "#0059C8",
+                            borderRadius: 3,
+                            animation:
+                              "adoptProgress 1.2s ease-in-out infinite",
+                          }}
+                        />
+                      </div>
                     )}
-                  </Button>
+                  </div>
+
+                  {adopting && (
+                    <div style={{ fontSize: 12, color: "#666" }}>
+                      Estimated total time: {formatDuration(estimatedTotalMs)}
+                      <br />
+                      Elapsed: {formatDuration(elapsedMs)}
+                      <br />
+                      Remaining: {formatDuration(remainingMs)}
+                    </div>
+                  )}
+
                   {adoptMsg && (
                     <Note variant={noteVariant} title={noteTitle}>
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
                         {adoptMsg}
                       </pre>
+
+                      {adoptStatus === "success" &&
+                        actualDurationMs != null && (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#666",
+                              marginTop: 8,
+                            }}
+                          >
+                            Completed in {formatDuration(actualDurationMs)}.
+                            {savedMs != null &&
+                              ` Estimated time saved: ${formatDuration(savedMs)}.`}
+                          </div>
+                        )}
                     </Note>
-                  )}
-                  {adopting && (
-                    <div
-                      style={{
-                        display: "inline-block",
-                        width: 120,
-                        height: 6,
-                        background: "#e0e0e0",
-                        borderRadius: 3,
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "40%",
-                          height: "100%",
-                          background: "#0059C8",
-                          borderRadius: 3,
-                          animation: "adoptProgress 1.2s ease-in-out infinite",
-                        }}
-                      />
-                    </div>
                   )}
                 </div>
               </div>

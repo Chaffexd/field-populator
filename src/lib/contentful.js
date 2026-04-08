@@ -1,7 +1,7 @@
 import { createClient } from "contentful-management";
 
 export const cmaSDK = (sdk) => createClient(
-  { apiAdapter: sdk.cmaAdapter },
+  { accessToken: "" },
   {
     type: "plain",
     defaults: {
