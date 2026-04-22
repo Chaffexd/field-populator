@@ -157,12 +157,13 @@ const Dialog = () => {
   const [diffData, setDiffData] = useState(null);
 
   const [adoptStatus, setAdoptStatus] = useState("idle");
-  const [adoptAll, setAdoptAll] = useState(true);
+  const [adoptAll, setAdoptAll] = useState(false);
   const [allFields, setAllFields] = useState([]); // [{ entryId, fieldId }]
   const [overwriteAll, setOverwriteAll] = useState(false);
 
   // Per-field selections
   const [selected, setSelected] = useState({});
+  const [overwriteSelected, setOverwriteSelected] = useState({});
 
   // Multiselect state
   const [adoptTargets, setAdoptTargets] = useState([]);
@@ -272,6 +273,11 @@ const Dialog = () => {
     setAdoptMsg((prev) => (prev === null ? prev : null));
   }, [sourceLocale, targetLocale, adoptTargetsKey, overwriteAll]);
 
+  // Reset per-field overwrite selections when the diff reloads
+  useEffect(() => {
+    setOverwriteSelected({});
+  }, [sourceLocale, targetLocale]);
+
   const onToggleField = (entryIdForField, fieldId, isChecked) => {
     // If adoptAll was true and user unticks even one → turn off adoptAll
     if (adoptAll && !isChecked) {
@@ -293,6 +299,17 @@ const Dialog = () => {
       return;
     }
 
+    // When checking merge, clear any per-field overwrite for this field
+    if (isChecked) {
+      setOverwriteSelected((prev) => {
+        const next = { ...prev };
+        const set = new Set(next[entryIdForField] || []);
+        set.delete(fieldId);
+        next[entryIdForField] = set;
+        return next;
+      });
+    }
+
     // Normal partial-mode behaviour (explicit selections)
     setSelected((prev) => {
       const next = { ...prev };
@@ -301,6 +318,44 @@ const Dialog = () => {
       if (isChecked) set.add(fieldId);
       else set.delete(fieldId);
 
+      next[entryIdForField] = set;
+      return next;
+    });
+  };
+
+  const onToggleOverwrite = (entryIdForField, fieldId, isChecked) => {
+    // If adoptAll was true, transition to partial mode
+    if (isChecked && adoptAll) {
+      setAdoptAll(false);
+
+      // Build merge selected = all fields except this one (it becomes overwrite)
+      setSelected(() => {
+        const next = {};
+        (allFields || []).forEach(({ entryId, fieldId: fid }) => {
+          if (entryId === entryIdForField && fid === fieldId) return;
+          if (!next[entryId]) next[entryId] = new Set();
+          next[entryId].add(fid);
+        });
+        return next;
+      });
+    }
+
+    // When checking overwrite, remove from merge selected
+    if (isChecked) {
+      setSelected((prev) => {
+        const next = { ...prev };
+        const set = new Set(next[entryIdForField] || []);
+        set.delete(fieldId);
+        next[entryIdForField] = set;
+        return next;
+      });
+    }
+
+    setOverwriteSelected((prev) => {
+      const next = { ...prev };
+      const set = new Set(next[entryIdForField] || []);
+      if (isChecked) set.add(fieldId);
+      else set.delete(fieldId);
       next[entryIdForField] = set;
       return next;
     });
@@ -448,6 +503,7 @@ const Dialog = () => {
           selected,
           adoptAll,
           overwriteAll,
+          overwriteSelected,
         });
 
         totalChangedFields += summary.changedFields;
@@ -577,7 +633,7 @@ const Dialog = () => {
         ? "Adoption complete"
         : adoptStatus === "error"
           ? "Adoption failed"
-          : "Do you wish to adopt these changes?";
+          : "Do you wish to merge these changes?";
 
   const remainingMs =
     estimatedTotalMs != null ? Math.max(0, estimatedTotalMs - elapsedMs) : null;
@@ -664,20 +720,21 @@ const Dialog = () => {
         </div>
       )}
 
-      {diffData && (
-        <>
-          <DiffChecker
-            diffTree={diffData}
-            spaceId={spaceId}
-            environmentId={environmentId}
-            entryId={entryId}
-            selected={selected}
-            onToggleField={onToggleField}
-            adoptAll={adoptAll}
-            overwriteAll={overwriteAll}
-          />
+      {diffData && (() => {
+        const hasSelection =
+          adoptAll ||
+          overwriteAll ||
+          Object.values(selected).some((s) => s.size > 0) ||
+          Object.values(overwriteSelected).some((s) => s.size > 0);
 
-          {/* Multi-adopt block */}
+        const isActionDisabled =
+          adopting ||
+          !sourceLocale ||
+          (!targetLocale && adoptTargets.length === 0) ||
+          !hasSelection ||
+          adoptStatus === "success";
+
+        const actionPanel = (
           <div style={{ margin: 20 }}>
             <Note variant={noteVariant} title={noteTitle}>
               <div style={{ display: "grid", gap: 12 }}>
@@ -687,10 +744,13 @@ const Dialog = () => {
                     checked={adoptAll}
                     onChange={(e) => {
                       setAdoptAll(e.target.checked);
-                      if (e.target.checked) setSelected({});
+                      if (e.target.checked) {
+                        setSelected({});
+                        setOverwriteSelected({});
+                      }
                     }}
                   />
-                  Adopt all fields
+                  Merge all fields
                 </label>
 
                 <label style={{ display: "flex", gap: 8, marginLeft: 20 }}>
@@ -706,6 +766,7 @@ const Dialog = () => {
                       if (checked) {
                         setAdoptAll(true);
                         setSelected({});
+                        setOverwriteSelected({});
                       }
                     }}
                   />
@@ -781,12 +842,7 @@ const Dialog = () => {
                     <Button
                       variant="positive"
                       onClick={adoptChanges}
-                      isDisabled={
-                        adopting ||
-                        !sourceLocale ||
-                        (!targetLocale && adoptTargets.length === 0) ||
-                        adoptStatus === "success"
-                      }
+                      isDisabled={isActionDisabled}
                     >
                       {adopting ? (
                         <span
@@ -802,7 +858,7 @@ const Dialog = () => {
                       ) : adoptStatus === "success" ? (
                         "Adopted ✓"
                       ) : (
-                        "Adopt Source → Target"
+                        "Merge Source → Target"
                       )}
                     </Button>
 
@@ -867,8 +923,29 @@ const Dialog = () => {
               </div>
             </Note>
           </div>
-        </>
-      )}
+        );
+
+        return (
+          <>
+            {actionPanel}
+
+            <DiffChecker
+              diffTree={diffData}
+              spaceId={spaceId}
+              environmentId={environmentId}
+              entryId={entryId}
+              selected={selected}
+              onToggleField={onToggleField}
+              adoptAll={adoptAll}
+              overwriteAll={overwriteAll}
+              overwriteSelected={overwriteSelected}
+              onToggleOverwrite={onToggleOverwrite}
+            />
+
+            {actionPanel}
+          </>
+        );
+      })()}
     </div>
   );
 };

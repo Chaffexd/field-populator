@@ -150,7 +150,8 @@ describe("Dialog component", () => {
       "Diff loaded: initial diff",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Adopt Source → Target" }));
+    fireEvent.click(screen.getAllByLabelText(/Merge all fields/i)[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Merge Source → Target" })[0]);
 
     await waitFor(() =>
       expect(adoptEntryTreeMock).toHaveBeenCalledWith({
@@ -164,6 +165,7 @@ describe("Dialog component", () => {
         selected: {},
         adoptAll: true,
         overwriteAll: false,
+        overwriteSelected: {},
       }),
     );
 
@@ -179,7 +181,7 @@ describe("Dialog component", () => {
     );
 
     expect(
-      screen.getByText("Adopted 2 fields across 1 entries (en-GB)."),
+      screen.getAllByText("Adopted 2 fields across 1 entries (en-GB).")[0],
     ).toBeInTheDocument();
   });
 
@@ -202,8 +204,9 @@ describe("Dialog component", () => {
 
     await waitFor(() => expect(buildDiffTreeMock).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByLabelText(/Overwrite all fields/i));
-    fireEvent.click(screen.getByRole("button", { name: "Adopt Source → Target" }));
+    fireEvent.click(screen.getAllByLabelText(/Merge all fields/i)[0]);
+    fireEvent.click(screen.getAllByLabelText(/Overwrite all fields/i)[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Merge Source → Target" })[0]);
 
     await waitFor(() =>
       expect(adoptEntryTreeMock).toHaveBeenCalledWith(

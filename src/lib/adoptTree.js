@@ -80,6 +80,7 @@ async function processOneEntry({
   selected,
   adoptAll,
   overwriteAll,
+  overwriteSelected = {},
 }) {
   const summary = { updatedEntries: 0, changedFields: 0, traversedEntries: 0 };
   const refIds = new Set();
@@ -106,6 +107,7 @@ async function processOneEntry({
   }
 
   const allowedForThisEntry = selected?.[entryId] || new Set();
+  const overwriteForThisEntry = overwriteSelected?.[entryId] || new Set();
 
   const fields = entry.fields || {};
   const newFields = { ...fields };
@@ -116,6 +118,8 @@ async function processOneEntry({
     const localizedValues = fields[fieldId];
     if (!localizedValues) continue;
 
+    const shouldOverwrite = overwriteAll || overwriteForThisEntry.has(fieldId);
+
     // ---------------------------------------------------------------------
     // SINGLE ENTRY LINK
     // ---------------------------------------------------------------------
@@ -125,7 +129,7 @@ async function processOneEntry({
         const tgtLink = localizedValues?.[targetLocale];
 
         // overwrite
-        if (overwriteAll && srcLink !== undefined) {
+        if (shouldOverwrite && srcLink !== undefined) {
           newFields[fieldId] = {
             ...localizedValues,
             [targetLocale]: clone(srcLink),
@@ -186,7 +190,7 @@ async function processOneEntry({
         const srcArr = localizedValues?.[sourceLocale];
         const tgtArr = localizedValues?.[targetLocale];
 
-        if (overwriteAll && srcArr !== undefined) {
+        if (shouldOverwrite && srcArr !== undefined) {
           newFields[fieldId] = {
             ...localizedValues,
             [targetLocale]: clone(srcArr),
@@ -248,7 +252,7 @@ async function processOneEntry({
     // ---------------------------------------------------------------------
     if (!def.localized) continue;
 
-    if (!overwriteAll && !adoptAll && !allowedForThisEntry.has(fieldId)) {
+    if (!shouldOverwrite && !adoptAll && !allowedForThisEntry.has(fieldId)) {
       continue;
     }
 
@@ -269,7 +273,7 @@ async function processOneEntry({
         continue;
       }
 
-      if (overwriteAll) {
+      if (shouldOverwrite) {
         if (normalizedSrc !== undefined) {
           newFields[fieldId] = {
             ...localizedValues,
@@ -308,7 +312,7 @@ async function processOneEntry({
     }
 
     // OVERWRITE MODE — replace target with source
-    if (overwriteAll) {
+    if (shouldOverwrite) {
       if (srcVal !== undefined) {
         newFields[fieldId] = {
           ...localizedValues,
@@ -429,6 +433,7 @@ export async function adoptEntryTree({
   selected = {},
   adoptAll = false,
   overwriteAll = false,
+  overwriteSelected = {},
 }) {
   const total = { updatedEntries: 0, changedFields: 0, traversedEntries: 0 };
 
@@ -468,6 +473,7 @@ export async function adoptEntryTree({
           selected,
           adoptAll,
           overwriteAll,
+          overwriteSelected,
         });
 
         total.updatedEntries += summary.updatedEntries;
