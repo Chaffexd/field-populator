@@ -1100,6 +1100,250 @@ export function RichTextDiffWithEmbeddedRefs({
 }
 
 /* -------------------------------------------------------------------------- */
+/* SecondaryFeatures — hoisted out of NodeRenderer to module level            */
+/* -------------------------------------------------------------------------- */
+export function SecondaryFeatures({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {value.map((f, i) => {
+        const title =
+          f.entryTitle || (isRichTextDocument(f.subhead) ? "—" : "—");
+
+        const subhead = f.subhead
+          ? documentToReactComponents(f.subhead)
+          : null;
+        const text = f.text ? documentToReactComponents(f.text) : null;
+
+        const hero = parseJsonAssetField(f.heroImage);
+        const pageLink = f.pageLink;
+
+        return (
+          <div
+            key={pageLink?.id || title || i}
+            style={{
+              border: "1px solid #eee",
+              borderRadius: 6,
+              padding: 12,
+              background: "#fff",
+            }}
+          >
+            <strong style={{ display: "block", marginBottom: 6 }}>
+              {f.entryTitle || "(no title)"}
+            </strong>
+
+            {subhead ? (
+              <div style={{ marginBottom: 6 }}>{subhead}</div>
+            ) : null}
+
+            {text ? <div style={{ marginBottom: 10 }}>{text}</div> : null}
+
+            {/* image */}
+            {hero?.kind === "image" ? (
+              <img
+                src={hero.url}
+                alt={hero.alt || ""}
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: 200,
+                  objectFit: "contain",
+                  borderRadius: 4,
+                  marginBottom: 10,
+                }}
+              />
+            ) : hero?.kind === "video" ? (
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+                🎥 Video: {hero.assetName || "(unnamed)"}
+              </div>
+            ) : null}
+
+            {/* CTA */}
+            {f.ctaText || f.ctaUrl ? (
+              <div style={{ fontSize: 12 }}>
+                <strong>CTA:</strong> {f.ctaText ? f.ctaText : "(no text)"}{" "}
+                {f.ctaUrl ? `→ ${f.ctaUrl}` : ""}
+              </div>
+            ) : null}
+
+            {/* page link */}
+            {pageLink?.id ? (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                <strong>Page link:</strong>{" "}
+                {pageLink.slug
+                  ? `${pageLink.slug} (${pageLink.id})`
+                  : pageLink.id}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* MediaGallery — hoisted out of NodeRenderer to module level                 */
+/* -------------------------------------------------------------------------- */
+export function MediaGallery({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, 1fr)",
+        gap: 12,
+      }}
+    >
+      {value.map((item, i) => {
+        const asset = parseJsonAssetField(item);
+
+        if (!asset) {
+          return (
+            <div key={i} style={{ border: "1px solid #eee", padding: 10 }}>
+              (invalid asset)
+            </div>
+          );
+        }
+
+        return (
+          <div
+            key={asset.url || `${asset.assetName}-${i}`}
+            style={{
+              border: "1px solid #eee",
+              borderRadius: 6,
+              padding: 10,
+              background: "#fff",
+            }}
+          >
+            {asset.kind === "image" ? (
+              <img
+                src={asset.url}
+                alt={asset.alt || ""}
+                style={{
+                  width: "100%",
+                  maxHeight: 180,
+                  objectFit: "contain",
+                  borderRadius: 4,
+                  marginBottom: 8,
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: 12, color: "#666" }}>
+                🎥 Video: {asset.assetName || "(unnamed)"}
+              </div>
+            )}
+
+            <div style={{ fontSize: 12, color: "#666" }}>
+              <strong>{asset.assetName || "(no name)"}</strong>
+            </div>
+
+            {asset.alt ? (
+              <div style={{ fontSize: 12, color: "#777", marginTop: 4 }}>
+                <strong>Alt:</strong> {asset.alt}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* FeaturedSolutions — hoisted out of NodeRenderer to module level            */
+/* -------------------------------------------------------------------------- */
+export function FeaturedSolutions({ value }) {
+  if (!Array.isArray(value)) return null;
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {value.map((item, i) => {
+        const headline = item?.headline
+          ? documentToReactComponents(item.headline)
+          : null;
+
+        const text = item?.text ? documentToReactComponents(item.text) : null;
+
+        const asset = parseJsonAssetField(item?.imageVideoAsset);
+
+        const pageLink = item?.pageLink;
+
+        return (
+          <div
+            key={pageLink?.id || item?.entryTitle || i}
+            style={{
+              border: "1px solid #eee",
+              borderRadius: 6,
+              padding: 12,
+              background: "#fff",
+            }}
+          >
+            <strong style={{ display: "block", marginBottom: 6 }}>
+              {item?.entryTitle || "(no title)"}
+            </strong>
+
+            {headline ? (
+              <div style={{ marginBottom: 6 }}>{headline}</div>
+            ) : null}
+
+            {text ? <div style={{ marginBottom: 10 }}>{text}</div> : null}
+
+            {/* image */}
+            {asset?.kind === "image" ? (
+              <img
+                src={asset.url}
+                alt={asset.alt || ""}
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: 200,
+                  objectFit: "contain",
+                  borderRadius: 4,
+                  marginBottom: 10,
+                }}
+              />
+            ) : asset?.kind === "video" ? (
+              <div
+                style={{
+                  padding: 8,
+                  border: "1px solid #eee",
+                  borderRadius: 6,
+                  marginBottom: 10,
+                  fontSize: 12,
+                  color: "#666",
+                }}
+              >
+                🎥 Video: {asset.assetName || "(unnamed)"}
+              </div>
+            ) : null}
+
+            {/* CTA */}
+            {item?.ctaText || item?.ctaUrl ? (
+              <div style={{ fontSize: 12 }}>
+                <strong>CTA:</strong>{" "}
+                {item.ctaText ? item.ctaText : "(no text)"}{" "}
+                {item.ctaUrl ? `→ ${item.ctaUrl}` : ""}
+              </div>
+            ) : null}
+
+            {/* page link */}
+            {pageLink?.id ? (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                <strong>Page link:</strong>{" "}
+                {pageLink.slug
+                  ? `${pageLink.slug} (${pageLink.id})`
+                  : pageLink.id}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* JSON_FIELDS — maps field API names to JSON-array renderers                 */
 /* -------------------------------------------------------------------------- */
 export const JSON_FIELDS = {
