@@ -416,7 +416,7 @@ export default function Dialog() {
 
       {(diffData || diffLoading || diffError) && (
         <>
-          {controls}
+          {diffData && controls}
           <DiffViewer
             loading={diffLoading}
             error={diffError}
