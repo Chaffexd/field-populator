@@ -120,6 +120,7 @@ export default function Dialog() {
         setDiffLoading(true);
         setDiffData(null);
         const entry = await cma.entry.get({ entryId, environmentId, spaceId });
+        console.log("Fetched entry for diff:", entry);
         const tree = await buildDiffTree({
           entry, cma, sourceLocale, targetLocale,
           defaultLocale: locales.find((l) => l.default)?.code,
@@ -136,6 +137,16 @@ export default function Dialog() {
     };
     run();
   }, [sourceLocale, targetLocale, entryId, environmentId, spaceId, cma, locales]);
+
+  // Debug: log locale state whenever source or adopt targets change
+  useEffect(() => {
+    console.log("==== LOCALE DEBUG ====");
+    console.log("Source locale:", sourceLocale);
+    console.log("All locales:", locales.map((l) => l.code));
+    console.log("Allowed bases:", allowedBases);
+    console.log("Adopt targets:", adoptTargets);
+    console.log("==== END DEBUG ====");
+  }, [sourceLocale, locales, allowedBases, adoptTargets]);
 
   // Reset adoption status when anything selection-related changes
   useEffect(() => {
@@ -228,10 +239,12 @@ export default function Dialog() {
 
     const overallStart = performance.now();
     const defaultLocale = locales.find((l) => l.default)?.code;
+    console.log("Overwrite all:", overwriteAll);
 
     try {
       let totalChangedFields = 0;
       let totalUpdatedEntries = 0;
+      let totalTraversed = 0;
 
       for (const tgt of targets) {
         if (tgt === sourceLocale) continue;
@@ -243,9 +256,15 @@ export default function Dialog() {
         });
         totalChangedFields += summary.changedFields;
         totalUpdatedEntries += summary.updatedEntries;
+        totalTraversed += summary.traversedEntries ?? 0;
       }
 
       const overallMs = performance.now() - overallStart;
+      console.log(
+        `[ADOPT TOTAL] ${targets.join(", ")} | ${totalTraversed} entries traversed | ` +
+          `${totalUpdatedEntries} entries updated | ${totalChangedFields} fields | ` +
+          `${(overallMs / 1000).toFixed(2)}s`,
+      );
       setActualDurationMs(overallMs);
       setSavedMs(Math.max(0, targets.length * MANUAL_MS_PER_LOCALE - overallMs));
       setAdoptMsg(
