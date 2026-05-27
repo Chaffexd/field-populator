@@ -15,6 +15,9 @@ import { buildDiffTree } from "../lib/buildDiffTree";
 import { adoptEntryTree } from "../lib/adoptTree";
 import { callCMA } from "../lib/rateLimiter";
 
+// Locales that are always valid targets regardless of source locale (e.g. corporate default workarounds)
+const PINNED_TARGET_LOCALES = new Set(["zu-ZA"]);
+
 // Locale-pairing constraints
 const ALLOWED_BASES = new Set([
   "en",
@@ -25,7 +28,12 @@ const ALLOWED_BASES = new Set([
   "ar",
   "fr",
   "zh",
-  "jp",
+  "ja",
+  "ko",
+  "pl",
+  "pt",
+  "ru",
+  "uk",
 ]);
 
 const GLOBAL_EN_LOCALES = new Set([
@@ -87,6 +95,8 @@ const MANUAL_MS_PER_LOCALE = 90000; // assume 1.5 mins manual work per locale
 
 function isPairAllowed(sourceCode, targetCode) {
   if (!sourceCode || !targetCode) return false;
+
+  if (PINNED_TARGET_LOCALES.has(targetCode)) return true;
 
   const srcBase = sourceCode.split("-")[0];
   const tgtBase = targetCode.split("-")[0];
@@ -223,14 +233,12 @@ const Dialog = () => {
 
       try {
         setLoading(true);
-
+        setDiffData(null);
         const entry = await cma.entry.get({
           entryId,
           environmentId,
           spaceId,
         });
-
-        console.log("Fetched entry for diff:", entry);
 
         const tree = await buildDiffTree({
           entry,
@@ -383,27 +391,6 @@ const Dialog = () => {
       .filter((l) => GLOBAL_EN_LOCALES.has(l.code));
   }, [locales, sourceLocale]);
 
-  useEffect(() => {
-    console.log("==== GLOBAL EN DEBUG ====");
-    console.log("Source locale:", sourceLocale);
-
-    console.log(
-      "All locales:",
-      locales.map((l) => l.code),
-    );
-
-    console.log("Global EN allowed list:", Array.from(GLOBAL_EN_LOCALES));
-
-    console.log(
-      "Computed Global EN locales:",
-      globalEnAdoptLocales.map((l) => l.code),
-    );
-
-    console.log("Count:", globalEnAdoptLocales.length);
-
-    console.log("==== END DEBUG ====");
-  }, [globalEnAdoptLocales, locales, sourceLocale]);
-
   const handleAdoptSearchValueChange = (e) => {
     setAdoptSearch(e.target.value);
   };
@@ -490,8 +477,6 @@ const Dialog = () => {
         if (tgt === sourceLocale) continue;
         if (!isPairAllowed(sourceLocale, tgt)) continue;
 
-        console.log("Overwrite all:", overwriteAll);
-
         const summary = await adoptEntryTree({
           cma,
           entryId,
@@ -518,12 +503,6 @@ const Dialog = () => {
       const estimatedManualMs = targets.length * MANUAL_MS_PER_LOCALE;
       const saved = Math.max(0, estimatedManualMs - overallMs);
       setSavedMs(saved);
-
-      console.log(
-        `[ADOPT TOTAL] ${targets.join(", ")} | ${totalTraversed} entries traversed | ` +
-          `${totalUpdatedEntries} entries updated | ${totalChangedFields} fields | ` +
-          `${(overallMs / 1000).toFixed(2)}s`,
-      );
 
       setAdoptMsg(
         `Adopted ${totalChangedFields} field${
@@ -731,8 +710,7 @@ const Dialog = () => {
           adopting ||
           !sourceLocale ||
           (!targetLocale && adoptTargets.length === 0) ||
-          !hasSelection ||
-          adoptStatus === "success";
+          !hasSelection;
 
         const actionPanel = (
           <div style={{ margin: 20 }}>
