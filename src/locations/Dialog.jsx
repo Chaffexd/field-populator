@@ -47,7 +47,9 @@ function collectFields(tree, rootEntryId) {
 
 export default function Dialog() {
   const sdk = useSDK();
-  const cma = useMemo(() => cmaSDK(sdk), [sdk]);
+  const cma = useMemo(() => {
+    try { return cmaSDK(sdk); } catch { return null; }
+  }, [sdk]);
 
   // Read installation config with fallbacks for backwards compatibility
   const installParams = sdk.parameters?.installation ?? {};
@@ -98,6 +100,11 @@ export default function Dialog() {
 
   // Load locales on mount
   useEffect(() => {
+    if (!cma) {
+      setLocalesError("CMA client could not be initialised — check VITE_CMA_KEY in your .env file.");
+      setLocalesLoading(false);
+      return;
+    }
     const fetch = async () => {
       setLocalesLoading(true);
       setLocalesError(null);
