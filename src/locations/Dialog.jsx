@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Spinner } from "@contentful/f36-components";
+import { Note, Spinner } from "@contentful/f36-components";
 import { useSDK } from "@contentful/react-apps-toolkit";
 import { cmaSDK } from "../lib/contentful";
 import { buildDiffTree } from "../lib/buildDiffTree";
@@ -62,6 +62,7 @@ export default function Dialog() {
   const spaceId = invocation?.spaceId || sdk.ids.space;
 
   const [localesLoading, setLocalesLoading] = useState(true);
+  const [localesError, setLocalesError] = useState(null);
   const [locales, setLocales] = useState([]);
 
   const [sourceLocale, setSourceLocale] = useState(defaultSourceLocale);
@@ -99,15 +100,28 @@ export default function Dialog() {
   useEffect(() => {
     const fetch = async () => {
       setLocalesLoading(true);
-      const res = await callCMA(() =>
-        cma.locale.getMany({
-          environmentId: sdk.ids.environment,
-          spaceId: sdk.ids.space,
-          query: { limit: 1000 },
-        }),
-      );
-      setLocales(res.items);
-      setLocalesLoading(false);
+      setLocalesError(null);
+      try {
+        const res = await callCMA(() =>
+          cma.locale.getMany({
+            environmentId: sdk.ids.environment,
+            spaceId: sdk.ids.space,
+            query: { limit: 1000 },
+          }),
+        );
+        setLocales(res.items);
+      } catch (err) {
+        const status = err?.status ?? err?.response?.status;
+        setLocalesError(
+          status === 401
+            ? "Authentication failed (401) — the CMA token is invalid or expired."
+            : status === 403
+              ? "Access denied (403) — insufficient permissions to read locales."
+              : `Failed to load locales: ${err?.message ?? "unknown error"}`,
+        );
+      } finally {
+        setLocalesLoading(false);
+      }
     };
     fetch();
   }, [cma, sdk.ids.environment, sdk.ids.space]);
@@ -336,6 +350,16 @@ export default function Dialog() {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Spinner variant="primary" size="medium" />
+      </div>
+    );
+  }
+
+  if (localesError) {
+    return (
+      <div style={{ margin: 20 }}>
+        <Note variant="negative" title="Could not load locales">
+          {localesError}
+        </Note>
       </div>
     );
   }
