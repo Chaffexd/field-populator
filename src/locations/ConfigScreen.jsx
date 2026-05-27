@@ -1,61 +1,239 @@
-import React, { useCallback, useState, useEffect } from 'react';
-import { Heading, Form, Paragraph, Flex } from '@contentful/f36-components';
-import { css } from 'emotion';
-import { /* useCMA, */ useSDK } from '@contentful/react-apps-toolkit';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Button,
+  Flex,
+  Form,
+  Heading,
+  Note,
+  Paragraph,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+} from "@contentful/f36-components";
+import { useSDK } from "@contentful/react-apps-toolkit";
+import { callCMA } from "../lib/rateLimiter";
+import { cmaSDK } from "../lib/contentful";
+import {
+  ALLOWED_BASES_DEFAULT,
+  PINNED_TARGET_LOCALES,
+} from "../lib/localeUtils";
 
-const ConfigScreen = () => {
-  const [parameters, setParameters] = useState({});
+const HIDDEN_FIELDS_DEFAULT = [
+  "poolpartyTagIDs",
+  "LocaleValidation",
+  "localeValidation",
+  "globaltolocal",
+];
+
+export default function ConfigScreen() {
   const sdk = useSDK();
-  /*
-     To use the cma, inject it as follows.
-     If it is not needed, you can remove the next line.
-  */
-  // const cma = useCMA();
-  const onConfigure = useCallback(async () => {
-    // This method will be called when a user clicks on "Install"
-    // or "Save" in the configuration screen.
-    // for more details see https://www.contentful.com/developers/docs/extensibility/ui-extensions/sdk-reference/#register-an-app-configuration-hook
+  const cma = useMemo(() => cmaSDK(sdk), [sdk]);
 
-    // Get current the state of EditorInterface and other entities
-    // related to this app installation
-    const currentState = await sdk.app.getCurrentState();
-    return {
-      // Parameters to be persisted as the app configuration.
-      parameters,
-      // In case you don't want to submit any update to app
-      // locations, you can just pass the currentState as is
-      targetState: currentState,
-    };
-  }, [parameters, sdk]);
+  const [locales, setLocales] = useState([]);
+  const [defaultSourceLocale, setDefaultSourceLocale] = useState("");
+  const [defaultTargetLocale, setDefaultTargetLocale] = useState("");
+  const [allowedBases, setAllowedBases] = useState([...ALLOWED_BASES_DEFAULT]);
+  const [hiddenFields, setHiddenFields] = useState(HIDDEN_FIELDS_DEFAULT);
+  const [newBase, setNewBase] = useState("");
+  const [newField, setNewField] = useState("");
+  const [saveNote, setSaveNote] = useState(null);
+
+  const buildParams = useCallback(
+    () => ({
+      defaultSourceLocale: defaultSourceLocale || null,
+      defaultTargetLocale: defaultTargetLocale || null,
+      allowedBases,
+      hiddenFields,
+    }),
+    [defaultSourceLocale, defaultTargetLocale, allowedBases, hiddenFields],
+  );
 
   useEffect(() => {
-    // `onConfigure` allows to configure a callback to be
-    // invoked when a user attempts to install the app or update
-    // its configuration.
-    sdk.app.onConfigure(() => onConfigure());
-  }, [sdk, onConfigure]);
+    sdk.app.onConfigure(async () => {
+      const currentState = await sdk.app.getCurrentState();
+      return { parameters: buildParams(), targetState: currentState };
+    });
+  }, [sdk, buildParams]);
 
   useEffect(() => {
     (async () => {
-      // Get current parameters of the app.
-      // If the app is not installed yet, `parameters` will be `null`.
-      const currentParameters = await sdk.app.getParameters();
-      if (currentParameters) {
-        setParameters(currentParameters);
+      const [params, localesRes] = await Promise.all([
+        sdk.app.getParameters(),
+        callCMA(() =>
+          cma.locale.getMany({
+            environmentId: sdk.ids.environment,
+            spaceId: sdk.ids.space,
+            query: { limit: 1000 },
+          }),
+        ),
+      ]);
+
+      setLocales(localesRes.items);
+
+      if (params) {
+        if (params.defaultSourceLocale) setDefaultSourceLocale(params.defaultSourceLocale);
+        if (params.defaultTargetLocale) setDefaultTargetLocale(params.defaultTargetLocale);
+        if (Array.isArray(params.allowedBases)) setAllowedBases(params.allowedBases);
+        if (Array.isArray(params.hiddenFields)) setHiddenFields(params.hiddenFields);
       }
-      // Once preparation has finished, call `setReady` to hide
-      // the loading screen and present the app to a user.
+
       sdk.app.setReady();
     })();
-  }, [sdk]);
+  }, [sdk, cma]);
+
+  const handleSave = async () => {
+    try {
+      await sdk.app.setParameters(buildParams());
+      setSaveNote({ variant: "positive", text: "Configuration saved." });
+    } catch {
+      setSaveNote({ variant: "negative", text: "Failed to save. Please try again." });
+    }
+  };
+
+  const addBase = () => {
+    const trimmed = newBase.trim().toLowerCase();
+    if (trimmed && !allowedBases.includes(trimmed)) {
+      setAllowedBases((prev) => [...prev, trimmed]);
+    }
+    setNewBase("");
+  };
+
+  const removeBase = (base) =>
+    setAllowedBases((prev) => prev.filter((b) => b !== base));
+
+  const addField = () => {
+    const trimmed = newField.trim();
+    if (trimmed && !hiddenFields.includes(trimmed)) {
+      setHiddenFields((prev) => [...prev, trimmed]);
+    }
+    setNewField("");
+  };
+
+  const removeField = (field) =>
+    setHiddenFields((prev) => prev.filter((f) => f !== field));
+
+  const pillStyle = (color) => ({
+    display: "inline-flex", alignItems: "center", gap: 6,
+    background: color === "red" ? "rgba(239,68,68,0.08)" : "rgba(99,102,241,0.1)",
+    border: `1px solid ${color === "red" ? "rgba(239,68,68,0.2)" : "rgba(99,102,241,0.3)"}`,
+    borderRadius: 4, padding: "3px 10px", fontSize: 12, fontFamily: "monospace",
+  });
+
+  const removeBtn = {
+    background: "none", border: "none", cursor: "pointer",
+    color: "#666", padding: 0, lineHeight: 1,
+  };
 
   return (
-    <Flex flexDirection="column" className={css({ margin: '80px', maxWidth: '800px' })}>
+    <Flex flexDirection="column" style={{ margin: "80px auto", maxWidth: 800 }}>
       <Form>
-        <Heading>App Config</Heading>
-        <Paragraph>Welcome to your contentful app. This is your config page.</Paragraph>
+        <Heading>Locale Populator — Configuration</Heading>
+
+        {/* Default Locales */}
+        <div style={{ borderBottom: "1px solid #e5e5e5", paddingBottom: 24, marginBottom: 24 }}>
+          <Heading as="h3">Default Locales</Heading>
+          <Paragraph>Pre-selected when editors open the dialog.</Paragraph>
+          <Stack flexDirection="row" spacing="spacingM" style={{ marginTop: 12 }}>
+            <div style={{ flex: 1 }}>
+              <Text fontWeight="fontWeightMedium">Default source locale</Text>
+              <Select
+                value={defaultSourceLocale}
+                onChange={(e) => setDefaultSourceLocale(e.target.value)}
+                style={{ marginTop: 4 }}
+              >
+                <Select.Option value="">None</Select.Option>
+                {locales.map((l) => (
+                  <Select.Option key={l.sys.id} value={l.code}>
+                    {l.name} ({l.code})
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <Text fontWeight="fontWeightMedium">Default target locale</Text>
+              <Select
+                value={defaultTargetLocale}
+                onChange={(e) => setDefaultTargetLocale(e.target.value)}
+                style={{ marginTop: 4 }}
+              >
+                <Select.Option value="">None</Select.Option>
+                {locales.map((l) => (
+                  <Select.Option key={l.sys.id} value={l.code}>
+                    {l.name} ({l.code})
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+          </Stack>
+        </div>
+
+        {/* Locale Pairing Rules */}
+        <div style={{ borderBottom: "1px solid #e5e5e5", paddingBottom: 24, marginBottom: 24 }}>
+          <Heading as="h3">Locale Pairing Rules</Heading>
+          <Paragraph>
+            Allowed source base language codes. Target must share the same base.{" "}
+            Always allowed:{" "}
+            {Array.from(PINNED_TARGET_LOCALES).map((c) => (
+              <code key={c} style={{ background: "#f3f3f3", padding: "1px 5px", borderRadius: 3, fontSize: 12 }}>
+                {c}
+              </code>
+            ))}
+          </Paragraph>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {allowedBases.map((base) => (
+              <span key={base} style={pillStyle("blue")}>
+                {base}
+                <button onClick={() => removeBase(base)} style={removeBtn} aria-label={`Remove ${base}`}>✕</button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <TextInput
+              placeholder="e.g. pt"
+              value={newBase}
+              onChange={(e) => setNewBase(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addBase()}
+              size="small"
+              style={{ width: 120 }}
+            />
+            <Button size="small" variant="secondary" onClick={addBase}>Add</Button>
+          </div>
+        </div>
+
+        {/* Hidden Fields */}
+        <div style={{ paddingBottom: 24, marginBottom: 24 }}>
+          <Heading as="h3">Hidden Fields</Heading>
+          <Paragraph>Field IDs excluded from the diff view.</Paragraph>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {hiddenFields.map((field) => (
+              <span key={field} style={pillStyle("red")}>
+                {field}
+                <button onClick={() => removeField(field)} style={removeBtn} aria-label={`Remove ${field}`}>✕</button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <TextInput
+              placeholder="e.g. internalNote"
+              value={newField}
+              onChange={(e) => setNewField(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addField()}
+              size="small"
+              style={{ width: 200 }}
+            />
+            <Button size="small" variant="secondary" onClick={addField}>Add</Button>
+          </div>
+        </div>
+
+        {saveNote && (
+          <Note variant={saveNote.variant} style={{ marginBottom: 16 }}>
+            {saveNote.text}
+          </Note>
+        )}
+
+        <Button variant="primary" onClick={handleSave}>Save configuration</Button>
       </Form>
     </Flex>
   );
-};
-export default ConfigScreen;
+}
