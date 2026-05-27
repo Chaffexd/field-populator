@@ -34,7 +34,7 @@ export default function ConfigScreen() {
   const [defaultSourceLocale, setDefaultSourceLocale] = useState("");
   const [defaultTargetLocale, setDefaultTargetLocale] = useState("");
   const [allowedBases, setAllowedBases] = useState([...ALLOWED_BASES_DEFAULT]);
-  const [hiddenFields, setHiddenFields] = useState(HIDDEN_FIELDS_DEFAULT);
+  const [hiddenFields, setHiddenFields] = useState([...HIDDEN_FIELDS_DEFAULT]);
   const [newBase, setNewBase] = useState("");
   const [newField, setNewField] = useState("");
   const [saveNote, setSaveNote] = useState(null);

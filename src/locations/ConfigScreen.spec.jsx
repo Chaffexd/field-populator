@@ -1,23 +1,31 @@
 import React from 'react';
 import ConfigScreen from './ConfigScreen';
-import { render } from '@testing-library/react';
-import { mockCma, mockSdk } from '../../test/mocks';
+import { render, screen } from '@testing-library/react';
+import { mockSdk } from '../../test/mocks';
 import { vi } from 'vitest';
 
 vi.mock('@contentful/react-apps-toolkit', () => ({
   useSDK: () => mockSdk,
-  useCMA: () => mockCma,
+}));
+
+vi.mock('../lib/contentful', () => ({
+  cmaSDK: () => ({
+    locale: {
+      getMany: vi.fn().mockResolvedValue({ items: [] }),
+    },
+  }),
+}));
+
+vi.mock('../lib/rateLimiter', () => ({
+  callCMA: (fn) => fn(),
 }));
 
 describe('Config Screen component', () => {
-  it('Component text exists', async () => {
-    const { getByText } = render(<ConfigScreen />);
-
-    // simulate the user clicking the install button
-    await mockSdk.app.onConfigure.mock.calls[0][0]();
+  it('renders the main heading without crashing', async () => {
+    render(<ConfigScreen />);
 
     expect(
-      getByText('Welcome to your contentful app. This is your config page.')
+      await screen.findByText('Locale Populator — Configuration')
     ).toBeInTheDocument();
   });
 });
