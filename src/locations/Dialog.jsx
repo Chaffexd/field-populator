@@ -1,313 +1,167 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Paragraph,
-  Select,
-  Spinner,
-  TextInput,
-  Note,
-  Button,
-} from "@contentful/f36-components";
-import { Multiselect } from "@contentful/f36-multiselect";
+import { Spinner } from "@contentful/f36-components";
 import { useSDK } from "@contentful/react-apps-toolkit";
 import { cmaSDK } from "../lib/contentful";
-import DiffChecker from "../components/DiffChecker";
 import { buildDiffTree } from "../lib/buildDiffTree";
 import { adoptEntryTree } from "../lib/adoptTree";
 import { callCMA } from "../lib/rateLimiter";
+import {
+  isPairAllowed,
+  ALLOWED_BASES_DEFAULT,
+} from "../lib/localeUtils";
+import LocaleSelectors from "../components/LocaleSelectors";
+import MergeControls from "../components/MergeControls";
+import DiffViewer from "../components/DiffViewer";
 
-// Locales that are always valid targets regardless of source locale (e.g. corporate default workarounds)
-const PINNED_TARGET_LOCALES = new Set(["zu-ZA"]);
+const HIDDEN_FIELDS_DEFAULT = [
+  "poolpartyTagIDs","LocaleValidation","localeValidation","globaltolocal",
+];
 
-// Locale-pairing constraints
-const ALLOWED_BASES = new Set([
-  "en",
-  "de",
-  "es",
-  "nl",
-  "it",
-  "ar",
-  "fr",
-  "zh",
-  "ja",
-  "ko",
-  "pl",
-  "pt",
-  "ru",
-  "uk",
-]);
+const ESTIMATED_MS_PER_LOCALE = 12000;
+const BASE_OVERHEAD_MS = 3000;
+const MANUAL_MS_PER_LOCALE = 90000;
 
-const GLOBAL_EN_LOCALES = new Set([
-  "en-AU",
-  "en-BH",
-  "en-BG",
-  "en-HR",
-  "en-CZ",
-  "en-DK",
-  "en-EG",
-  "en-FI",
-  "en-GH",
-  "en-GR",
-  "en-HK",
-  "en-HU",
-  "en-IN",
-  "en-ID",
-  "en-IQ",
-  "en-IL",
-  "en-JO",
-  "en-KE",
-  "en-KW",
-  "en-LB",
-  "en-NZ",
-  "en-NG",
-  "en-NO",
-  "en-OM",
-  "en-PK",
-  "en-PH",
-  "en-QA",
-  "en-RO",
-  "en-SA",
-  "en-RS",
-  "en-SG",
-  "en-SK",
-  "en-ZA",
-  "en-SE",
-  "en-TW",
-  "en-TH",
-  "en-TR",
-  "en-AE",
-  "en-VN",
-]);
-
-function formatDuration(ms) {
-  if (!ms || ms < 0) return "0s";
-
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  if (minutes === 0) return `${seconds}s`;
-  return `${minutes}m ${seconds}s`;
-}
-
-const ESTIMATED_MS_PER_LOCALE = 12000; // 12s per locale to start with
-const BASE_OVERHEAD_MS = 3000; // 3s fixed setup overhead
-const MANUAL_MS_PER_LOCALE = 90000; // assume 1.5 mins manual work per locale
-
-function isPairAllowed(sourceCode, targetCode) {
-  if (!sourceCode || !targetCode) return false;
-
-  if (PINNED_TARGET_LOCALES.has(targetCode)) return true;
-
-  const srcBase = sourceCode.split("-")[0];
-  const tgtBase = targetCode.split("-")[0];
-
-  if (!ALLOWED_BASES.has(srcBase)) return false;
-  if (srcBase !== tgtBase) return false;
-
-  // ✅ Allow same exact locale OR base-only locale OR any region variant of the base
-  return (
-    targetCode === sourceCode ||
-    targetCode === srcBase ||
-    targetCode.startsWith(`${srcBase}-`)
-  );
-}
-
-// Flatten diffTree into a list of { entryId, fieldId } so we can build
-// "all fields except this one" when the user deselects a field in adoptAll mode.
 function collectFields(tree, rootEntryId) {
   const result = [];
-
   const walk = (nodeMap, currentEntryId) => {
-    if (!nodeMap) return;
-
-    // 🚨 Stop on circular node
-    if (nodeMap.type === "circular") return;
-
+    if (!nodeMap || nodeMap.type === "circular") return;
     Object.entries(nodeMap).forEach(([key, node]) => {
-      if (!node) return;
-      if (node.type === "circular") return;
-
+      if (!node || node.type === "circular") return;
       if (node.type === "field") {
         result.push({ entryId: currentEntryId, fieldId: key });
       } else if (node.type === "reference") {
         const childEntryId = node.linkEntryId || node.id || currentEntryId;
-        if (node.children) {
-          walk(node.children, childEntryId);
-        }
+        if (node.children) walk(node.children, childEntryId);
       } else if (node.type === "reference-list") {
         Object.values(node.children || {}).forEach((childNode) => {
-          if (!childNode) return;
-          if (childNode.type === "circular") return;
-
-          const childEntryId =
-            childNode.linkEntryId || childNode.id || currentEntryId;
-
-          if (childNode.children) {
-            walk(childNode.children, childEntryId);
-          }
+          if (!childNode || childNode.type === "circular") return;
+          const childEntryId = childNode.linkEntryId || childNode.id || currentEntryId;
+          if (childNode.children) walk(childNode.children, childEntryId);
         });
       }
     });
   };
-
   walk(tree, rootEntryId);
   return result;
 }
 
-const Dialog = () => {
+export default function Dialog() {
   const sdk = useSDK();
   const cma = useMemo(() => cmaSDK(sdk), [sdk]);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  // Read installation config with fallbacks for backwards compatibility
+  const installParams = sdk.parameters?.installation ?? {};
+  const allowedBases = installParams.allowedBases ?? ALLOWED_BASES_DEFAULT;
+  const hiddenFields = installParams.hiddenFields ?? HIDDEN_FIELDS_DEFAULT;
+  const defaultSourceLocale = installParams.defaultSourceLocale ?? undefined;
+  const defaultTargetLocale = installParams.defaultTargetLocale ?? undefined;
+
+  const invocation = sdk.parameters.invocation;
+  const entryId = invocation?.entryId || sdk.ids.entry;
+  const environmentId = invocation?.environmentId || sdk.ids.environment;
+  const spaceId = invocation?.spaceId || sdk.ids.space;
+
+  const [localesLoading, setLocalesLoading] = useState(true);
   const [locales, setLocales] = useState([]);
 
-  const [sourceLocale, setSourceLocale] = useState();
-  const [targetLocale, setTargetLocale] = useState();
+  const [sourceLocale, setSourceLocale] = useState(defaultSourceLocale);
+  const [targetLocale, setTargetLocale] = useState(defaultTargetLocale);
+
   const [diffData, setDiffData] = useState(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState(null);
 
-  const [adoptStatus, setAdoptStatus] = useState("idle");
   const [adoptAll, setAdoptAll] = useState(false);
-  const [allFields, setAllFields] = useState([]); // [{ entryId, fieldId }]
   const [overwriteAll, setOverwriteAll] = useState(false);
-
-  // Per-field selections
+  const [allFields, setAllFields] = useState([]);
   const [selected, setSelected] = useState({});
   const [overwriteSelected, setOverwriteSelected] = useState({});
-
-  // Multiselect state
   const [adoptTargets, setAdoptTargets] = useState([]);
-  const [adopting, setAdopting] = useState(false);
-  const [adoptMsg, setAdoptMsg] = useState(null);
-  const [adoptSearch, setAdoptSearch] = useState("");
-  const [selectAllLocales, setSelectAllLocales] = useState(false);
-  const [selectAllGlobalEn, setSelectAllGlobalEn] = useState(false);
-  const SELECT_ALL_VALUE = "__SELECT_ALL_LOCALES__";
-  const SELECT_ALL_GLOBAL_EN_VALUE = "__SELECT_ALL_GLOBAL_EN__";
 
-  // Performance state
+  const [adopting, setAdopting] = useState(false);
+  const [adoptStatus, setAdoptStatus] = useState("idle");
+  const [adoptMsg, setAdoptMsg] = useState(null);
+
   const [adoptStartedAt, setAdoptStartedAt] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [estimatedTotalMs, setEstimatedTotalMs] = useState(null);
   const [actualDurationMs, setActualDurationMs] = useState(null);
   const [savedMs, setSavedMs] = useState(null);
 
+  // Elapsed timer during adoption
   useEffect(() => {
     if (!adopting || !adoptStartedAt) return;
-
-    const id = setInterval(() => {
-      setElapsedMs(performance.now() - adoptStartedAt);
-    }, 1000);
-
+    const id = setInterval(() => setElapsedMs(performance.now() - adoptStartedAt), 1000);
     return () => clearInterval(id);
   }, [adopting, adoptStartedAt]);
 
-  // Invocation
-  const params = sdk.parameters.invocation;
-  const entryId = params?.entryId || sdk.ids.entry;
-  const environmentId = params?.environmentId || sdk.ids.environment;
-  const spaceId = params?.spaceId || sdk.ids.space;
-
-  // Load locales
+  // Load locales on mount
   useEffect(() => {
-    const fetchLocales = async () => {
-      setLoading(true);
-      const localesRes = await callCMA(() =>
+    const fetch = async () => {
+      setLocalesLoading(true);
+      const res = await callCMA(() =>
         cma.locale.getMany({
           environmentId: sdk.ids.environment,
           spaceId: sdk.ids.space,
           query: { limit: 1000 },
         }),
       );
-      setLocales(localesRes.items);
-      setLoading(false);
+      setLocales(res.items);
+      setLocalesLoading(false);
     };
-
-    fetchLocales();
+    fetch();
   }, [cma, sdk.ids.environment, sdk.ids.space]);
 
-  // Load diff
+  // Load diff when locale pair changes
   useEffect(() => {
     const run = async () => {
       if (!sourceLocale || !targetLocale) return;
-
       try {
-        setLoading(true);
+        setDiffLoading(true);
         setDiffData(null);
-        const entry = await cma.entry.get({
-          entryId,
-          environmentId,
-          spaceId,
-        });
-
+        const entry = await cma.entry.get({ entryId, environmentId, spaceId });
         const tree = await buildDiffTree({
-          entry,
-          cma,
-          sourceLocale,
-          targetLocale,
+          entry, cma, sourceLocale, targetLocale,
           defaultLocale: locales.find((l) => l.default)?.code,
-          cache: {},
-          visited: new Set(),
-          maxDepth: 4,
-          maxNodes: 250,
+          cache: {}, visited: new Set(), maxDepth: 4, maxNodes: 250,
         });
-
         setDiffData(tree);
-        setAllFields(collectFields(tree, entryId)); // track all fields in this diff
-        setError(null);
-      } catch (err) {
-        console.error(err);
-        setError("Failed to fetch entry for diff");
+        setAllFields(collectFields(tree, entryId));
+        setDiffError(null);
+      } catch {
+        setDiffError("Failed to fetch entry for diff");
       } finally {
-        setLoading(false);
+        setDiffLoading(false);
       }
     };
-
     run();
-  }, [
-    sourceLocale,
-    targetLocale,
-    entryId,
-    environmentId,
-    spaceId,
-    cma,
-    locales,
-  ]);
+  }, [sourceLocale, targetLocale, entryId, environmentId, spaceId, cma, locales]);
 
-  // Re-enable button when locale selection changes after a completed adoption
-  const adoptTargetsKey = adoptTargets.join(",");
+  // Reset adoption status when anything selection-related changes
   useEffect(() => {
-    setAdoptStatus((prev) => (prev === "idle" ? prev : "idle"));
-    setAdoptMsg((prev) => (prev === null ? prev : null));
-  }, [sourceLocale, targetLocale, adoptTargetsKey, overwriteAll]);
+    setAdoptStatus("idle");
+    setAdoptMsg(null);
+  }, [sourceLocale, targetLocale, overwriteAll]);
 
-  // Reset per-field overwrite selections when the diff reloads
+  // Reset per-field overwrite when locale pair changes
   useEffect(() => {
     setOverwriteSelected({});
   }, [sourceLocale, targetLocale]);
 
   const onToggleField = (entryIdForField, fieldId, isChecked) => {
-    // If adoptAll was true and user unticks even one → turn off adoptAll
     if (adoptAll && !isChecked) {
       setAdoptAll(false);
-
-      // Build explicit selected list = all fields except the one they unchecked
       setSelected(() => {
         const next = {};
-
-        (allFields || []).forEach(({ entryId, fieldId: fid }) => {
-          if (entryId === entryIdForField && fid === fieldId) return; // skip unchecked
-          if (!next[entryId]) next[entryId] = new Set();
-          next[entryId].add(fid);
+        (allFields || []).forEach(({ entryId: eid, fieldId: fid }) => {
+          if (eid === entryIdForField && fid === fieldId) return;
+          if (!next[eid]) next[eid] = new Set();
+          next[eid].add(fid);
         });
-
         return next;
       });
-
       return;
     }
-
-    // When checking merge, clear any per-field overwrite for this field
     if (isChecked) {
       setOverwriteSelected((prev) => {
         const next = { ...prev };
@@ -317,38 +171,28 @@ const Dialog = () => {
         return next;
       });
     }
-
-    // Normal partial-mode behaviour (explicit selections)
     setSelected((prev) => {
       const next = { ...prev };
       const set = new Set(next[entryIdForField] || []);
-
-      if (isChecked) set.add(fieldId);
-      else set.delete(fieldId);
-
+      if (isChecked) set.add(fieldId); else set.delete(fieldId);
       next[entryIdForField] = set;
       return next;
     });
   };
 
   const onToggleOverwrite = (entryIdForField, fieldId, isChecked) => {
-    // If adoptAll was true, transition to partial mode
     if (isChecked && adoptAll) {
       setAdoptAll(false);
-
-      // Build merge selected = all fields except this one (it becomes overwrite)
       setSelected(() => {
         const next = {};
-        (allFields || []).forEach(({ entryId, fieldId: fid }) => {
-          if (entryId === entryIdForField && fid === fieldId) return;
-          if (!next[entryId]) next[entryId] = new Set();
-          next[entryId].add(fid);
+        (allFields || []).forEach(({ entryId: eid, fieldId: fid }) => {
+          if (eid === entryIdForField && fid === fieldId) return;
+          if (!next[eid]) next[eid] = new Set();
+          next[eid].add(fid);
         });
         return next;
       });
     }
-
-    // When checking overwrite, remove from merge selected
     if (isChecked) {
       setSelected((prev) => {
         const next = { ...prev };
@@ -358,223 +202,90 @@ const Dialog = () => {
         return next;
       });
     }
-
     setOverwriteSelected((prev) => {
       const next = { ...prev };
       const set = new Set(next[entryIdForField] || []);
-      if (isChecked) set.add(fieldId);
-      else set.delete(fieldId);
+      if (isChecked) set.add(fieldId); else set.delete(fieldId);
       next[entryIdForField] = set;
       return next;
     });
   };
 
-  // Filter Multiselect list
-  const filteredAdoptLocales = useMemo(() => {
-    const needle = adoptSearch.trim().toLowerCase();
-
-    return (locales || [])
-      .filter((l) => l.code !== sourceLocale)
-      .filter((l) => isPairAllowed(sourceLocale, l.code))
-      .filter((l) =>
-        !needle
-          ? true
-          : (l.name || "").toLowerCase().includes(needle) ||
-            (l.code || "").toLowerCase().includes(needle),
-      );
-  }, [locales, sourceLocale, adoptSearch]);
-
-  const globalEnAdoptLocales = useMemo(() => {
-    return (locales || [])
-      .filter((l) => l.code !== sourceLocale)
-      .filter((l) => isPairAllowed(sourceLocale, l.code))
-      .filter((l) => GLOBAL_EN_LOCALES.has(l.code));
-  }, [locales, sourceLocale]);
-
-  const handleAdoptSearchValueChange = (e) => {
-    setAdoptSearch(e.target.value);
-  };
-
-  const handleSelectAdoptItem = (e) => {
-    const { checked, value } = e.target;
-
-    // Select all eligible locales
-    if (value === SELECT_ALL_VALUE) {
-      if (checked) {
-        setSelectAllLocales(true);
-        setSelectAllGlobalEn(false);
-        setAdoptTargets(filteredAdoptLocales.map((l) => l.code));
-      } else {
-        setSelectAllLocales(false);
-        setAdoptTargets([]);
-      }
-      return;
-    }
-
-    // Select all Global EN locales
-    if (value === SELECT_ALL_GLOBAL_EN_VALUE) {
-      if (checked) {
-        setSelectAllGlobalEn(true);
-        setSelectAllLocales(false);
-        setAdoptTargets(globalEnAdoptLocales.map((l) => l.code));
-      } else {
-        setSelectAllGlobalEn(false);
-        setAdoptTargets([]);
-      }
-      return;
-    }
-
-    // Normal locale toggle
-    setAdoptTargets((prev) => {
-      const next = checked
-        ? Array.from(new Set([...prev, value]))
-        : prev.filter((v) => v !== value);
-
-      // Manual changes disable synthetic selections
-      if (selectAllLocales) setSelectAllLocales(false);
-      if (selectAllGlobalEn) setSelectAllGlobalEn(false);
-
-      return next;
-    });
-  };
-
-  // Adopt changes
   const adoptChanges = async () => {
     if (!sourceLocale) return;
-
-    const overallStart = performance.now();
-
     const targets =
-      adoptTargets.length > 0
-        ? adoptTargets
-        : targetLocale
-          ? [targetLocale]
-          : [];
-
+      adoptTargets.length > 0 ? adoptTargets : targetLocale ? [targetLocale] : [];
     if (targets.length === 0) return;
-
-    const estimatedMs =
-      BASE_OVERHEAD_MS + targets.length * ESTIMATED_MS_PER_LOCALE;
 
     setAdoptStartedAt(performance.now());
     setElapsedMs(0);
-    setEstimatedTotalMs(estimatedMs);
+    setEstimatedTotalMs(BASE_OVERHEAD_MS + targets.length * ESTIMATED_MS_PER_LOCALE);
     setActualDurationMs(null);
     setSavedMs(null);
-
     setAdoptMsg(null);
     setAdopting(true);
     setAdoptStatus("running");
 
-    try {
-      const defaultLocale = locales.find((l) => l.default)?.code;
+    const overallStart = performance.now();
+    const defaultLocale = locales.find((l) => l.default)?.code;
 
+    try {
       let totalChangedFields = 0;
       let totalUpdatedEntries = 0;
-      let totalTraversed = 0;
 
       for (const tgt of targets) {
         if (tgt === sourceLocale) continue;
-        if (!isPairAllowed(sourceLocale, tgt)) continue;
-
+        if (!isPairAllowed(sourceLocale, tgt, allowedBases)) continue;
         const summary = await adoptEntryTree({
-          cma,
-          entryId,
-          environmentId,
-          spaceId,
-          sourceLocale,
-          targetLocale: tgt,
-          defaultLocale,
-          selected,
-          adoptAll,
-          overwriteAll,
-          overwriteSelected,
+          cma, entryId, environmentId, spaceId,
+          sourceLocale, targetLocale: tgt, defaultLocale,
+          selected, adoptAll, overwriteAll, overwriteSelected,
         });
-
         totalChangedFields += summary.changedFields;
         totalUpdatedEntries += summary.updatedEntries;
-        totalTraversed += summary.traversedEntries;
       }
 
       const overallMs = performance.now() - overallStart;
-
       setActualDurationMs(overallMs);
-
-      const estimatedManualMs = targets.length * MANUAL_MS_PER_LOCALE;
-      const saved = Math.max(0, estimatedManualMs - overallMs);
-      setSavedMs(saved);
-
+      setSavedMs(Math.max(0, targets.length * MANUAL_MS_PER_LOCALE - overallMs));
       setAdoptMsg(
-        `Adopted ${totalChangedFields} field${
-          totalChangedFields === 1 ? "" : "s"
-        } across ${totalUpdatedEntries} entries (${targets.join(", ")}).`,
+        `Adopted ${totalChangedFields} field${totalChangedFields === 1 ? "" : "s"} across ${totalUpdatedEntries} entries (${targets.join(", ")}).`,
       );
 
-      // Refresh diff
       if (targetLocale) {
-        const fresh = await cma.entry.get({
-          entryId,
-          environmentId,
-          spaceId,
-        });
-
+        const fresh = await cma.entry.get({ entryId, environmentId, spaceId });
         const tree = await buildDiffTree({
-          entry: fresh,
-          cma,
-          sourceLocale,
-          targetLocale,
-          defaultLocale,
-          cache: {},
-          visited: new Set(),
+          entry: fresh, cma, sourceLocale, targetLocale, defaultLocale,
+          cache: {}, visited: new Set(),
         });
-
         setDiffData(tree);
-        setAllFields(collectFields(tree, entryId)); // keep allFields in sync
+        setAllFields(collectFields(tree, entryId));
       }
 
       setAdoptStatus("success");
     } catch (err) {
-      console.error(err);
+      const rawMsg = typeof err?.message === "string" ? err.message.trim() : "";
+      let parsed = null;
+      if (rawMsg.startsWith("{") && rawMsg.endsWith("}")) {
+        try { parsed = JSON.parse(rawMsg); } catch {}
+      }
+      const errors = Array.from(
+        new Set(
+          parsed?.details?.errors?.map((e) => e?.message).filter(Boolean) ??
+          err?.details?.errors?.map((e) => e?.message).filter(Boolean) ?? [],
+        ),
+      );
       const BASE =
         "Adoption failed. Please double check validation rules.\n" +
         "If reporting this issue, include the requestId below.";
-
-      function formatAdoptError(err) {
-        // 1) Try to interpret err.message as JSON (Contentful SDK often puts JSON in message)
-        const rawMsg =
-          typeof err?.message === "string" ? err.message.trim() : "";
-        let parsed = null;
-
-        if (rawMsg.startsWith("{") && rawMsg.endsWith("}")) {
-          try {
-            parsed = JSON.parse(rawMsg);
-          } catch {
-            // not JSON, ignore
-          }
-        }
-
-        // 2) Prefer parsed.details.errors[].message if available
-        const errors =
-          parsed?.details?.errors?.map((e) => e?.message).filter(Boolean) ??
-          err?.details?.errors?.map((e) => e?.message).filter(Boolean) ??
-          [];
-
-        // Deduplicate (you have the same message repeated)
-        const uniqueErrors = Array.from(new Set(errors));
-
-        const messagesBlock =
-          uniqueErrors.length > 0
-            ? uniqueErrors.map((m) => `• ${m}`).join("\n")
-            : parsed?.message || rawMsg || "Unknown error";
-
-        const requestId = parsed?.requestId || err?.requestId;
-        const requestIdBlock = requestId ? `\n\nRequest ID: ${requestId}` : "";
-
-        return `${BASE}\n\n${messagesBlock}${requestIdBlock}`;
-      }
-
-      // usage
-      setAdoptMsg(formatAdoptError(err));
+      const messagesBlock =
+        errors.length > 0
+          ? errors.map((m) => `• ${m}`).join("\n")
+          : parsed?.message || rawMsg || "Unknown error";
+      const requestId = parsed?.requestId || err?.requestId;
+      setAdoptMsg(
+        `${BASE}\n\n${messagesBlock}${requestId ? `\n\nRequest ID: ${requestId}` : ""}`,
+      );
       setAdoptStatus("error");
     } finally {
       setAdopting(false);
@@ -582,350 +293,98 @@ const Dialog = () => {
     }
   };
 
-  if (loading)
+  const handleSourceChange = (v) => {
+    setSourceLocale(v);
+    if (targetLocale && !isPairAllowed(v, targetLocale, allowedBases)) {
+      setTargetLocale(undefined);
+    }
+    setAdoptTargets((prev) => prev.filter((code) => isPairAllowed(v, code, allowedBases)));
+  };
+
+  const hasSelection =
+    adoptAll ||
+    overwriteAll ||
+    Object.values(selected).some((s) => s.size > 0) ||
+    Object.values(overwriteSelected).some((s) => s.size > 0);
+
+  const isActionDisabled =
+    adopting ||
+    !sourceLocale ||
+    (!targetLocale && adoptTargets.length === 0) ||
+    !hasSelection;
+
+  if (localesLoading) {
     return (
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Spinner variant="primary" size="medium" />
       </div>
     );
+  }
 
-  const noteVariant =
-    adoptStatus === "running"
-      ? "warning"
-      : adoptStatus === "success"
-        ? "positive"
-        : adoptStatus === "error"
-          ? "negative"
-          : "primary";
-
-  const noteTitle =
-    adoptStatus === "running"
-      ? "Adopting changes…"
-      : adoptStatus === "success"
-        ? "Adoption complete"
-        : adoptStatus === "error"
-          ? "Adoption failed"
-          : "Do you wish to merge these changes?";
-
-  const remainingMs =
-    estimatedTotalMs != null ? Math.max(0, estimatedTotalMs - elapsedMs) : null;
+  const controls = (
+    <MergeControls
+      adoptAll={adoptAll}
+      overwriteAll={overwriteAll}
+      onAdoptAllChange={(checked) => {
+        setAdoptAll(checked);
+        if (checked) { setSelected({}); setOverwriteSelected({}); }
+      }}
+      onOverwriteAllChange={(checked) => {
+        setOverwriteAll(checked);
+        if (checked) { setAdoptAll(true); setSelected({}); setOverwriteSelected({}); }
+      }}
+      adopting={adopting}
+      adoptStatus={adoptStatus}
+      adoptMsg={adoptMsg}
+      isDisabled={isActionDisabled}
+      onAdopt={adoptChanges}
+      elapsedMs={elapsedMs}
+      estimatedTotalMs={estimatedTotalMs}
+      actualDurationMs={actualDurationMs}
+      savedMs={savedMs}
+      locales={locales}
+      sourceLocale={sourceLocale}
+      targetLocale={targetLocale}
+      adoptTargets={adoptTargets}
+      allowedBases={allowedBases}
+      onAdoptTargetsChange={setAdoptTargets}
+    />
+  );
 
   return (
     <div>
-      <style>{`
-        @keyframes adoptProgress {
-          0%   { transform: translateX(-100%); }
-          100% { transform: translateX(350%); }
-        }
-      `}</style>
-      {/* Locale Pickers */}
-      <div
-        style={{
-          margin: "20px",
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-        }}
-      >
-        <div style={{ flex: 1 }}>
-          <h3>Source Locale</h3>
-          <Select
-            name="sourceLocale"
-            value={sourceLocale ?? ""}
-            onChange={(e) => {
-              const v = e.target.value || undefined;
-              setSourceLocale(v);
+      <style>{`@keyframes adoptProgress { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }`}</style>
 
-              if (targetLocale && !isPairAllowed(v, targetLocale)) {
-                setTargetLocale(undefined);
-              }
+      <LocaleSelectors
+        locales={locales}
+        sourceLocale={sourceLocale}
+        targetLocale={targetLocale}
+        allowedBases={allowedBases}
+        onSourceChange={handleSourceChange}
+        onTargetChange={setTargetLocale}
+      />
 
-              setAdoptTargets((prev) =>
-                prev.filter((code) => isPairAllowed(v, code)),
-              );
-              setSelectAllLocales(false);
-              setSelectAllGlobalEn(false);
-            }}
-          >
-            <Select.Option value="">-- Select source locale --</Select.Option>
-
-            {locales.map((locale) => (
-              <Select.Option key={locale.sys.id} value={locale.code}>
-                {locale.name}
-              </Select.Option>
-            ))}
-          </Select>
-        </div>
-
-        <div style={{ flex: 1 }}>
-          <h3>Target Locale</h3>
-          <Select
-            name="targetLocale"
-            value={targetLocale ?? ""}
-            onChange={(e) => {
-              const v = e.target.value || undefined;
-              setTargetLocale(v);
-            }}
-          >
-            <Select.Option value="">-- Select target locale --</Select.Option>
-
-            {locales
-              .filter((l) => isPairAllowed(sourceLocale, l.code))
-              .map((locale) => (
-                <Select.Option key={locale.sys.id} value={locale.code}>
-                  {locale.name}
-                </Select.Option>
-              ))}
-          </Select>
-        </div>
-      </div>
-
-      {error && (
-        <div style={{ margin: 20 }}>
-          <Note
-            variant="negative"
-            title="Unable to compare - please ensure all references are accessible."
-          >
-            If you wish to report this, please take the requestId at the end of
-            the error message. {error}
-          </Note>
-        </div>
+      {(diffData || diffLoading || diffError) && (
+        <>
+          {controls}
+          <DiffViewer
+            loading={diffLoading}
+            error={diffError}
+            diffData={diffData}
+            spaceId={spaceId}
+            environmentId={environmentId}
+            entryId={entryId}
+            selected={selected}
+            onToggleField={onToggleField}
+            adoptAll={adoptAll}
+            overwriteAll={overwriteAll}
+            overwriteSelected={overwriteSelected}
+            onToggleOverwrite={onToggleOverwrite}
+            hiddenFields={hiddenFields}
+          />
+          {diffData && controls}
+        </>
       )}
-
-      {diffData && (() => {
-        const hasSelection =
-          adoptAll ||
-          overwriteAll ||
-          Object.values(selected).some((s) => s.size > 0) ||
-          Object.values(overwriteSelected).some((s) => s.size > 0);
-
-        const isActionDisabled =
-          adopting ||
-          !sourceLocale ||
-          (!targetLocale && adoptTargets.length === 0) ||
-          !hasSelection;
-
-        const actionPanel = (
-          <div style={{ margin: 20 }}>
-            <Note variant={noteVariant} title={noteTitle}>
-              <div style={{ display: "grid", gap: 12 }}>
-                <label style={{ display: "flex", gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={adoptAll}
-                    onChange={(e) => {
-                      setAdoptAll(e.target.checked);
-                      if (e.target.checked) {
-                        setSelected({});
-                        setOverwriteSelected({});
-                      }
-                    }}
-                  />
-                  Merge all fields
-                </label>
-
-                <label style={{ display: "flex", gap: 8, marginLeft: 20 }}>
-                  <input
-                    type="checkbox"
-                    checked={overwriteAll}
-                    disabled={!adoptAll}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setOverwriteAll(checked);
-
-                      // Overwrite implies adopt-all and no partial selections
-                      if (checked) {
-                        setAdoptAll(true);
-                        setSelected({});
-                        setOverwriteSelected({});
-                      }
-                    }}
-                  />
-                  <span>
-                    Overwrite all fields
-                    <span style={{ color: "#c00", marginLeft: 6 }}>
-                      (replaces all target values)
-                    </span>
-                  </span>
-                </label>
-
-                <div>
-                  <div style={{ marginBottom: 6, fontWeight: 600 }}>
-                    Adopt into additional locales (optional)
-                  </div>
-
-                  <Multiselect
-                    placeholder="Search and select locales"
-                    searchProps={{
-                      searchPlaceholder: "Search locales",
-                      onSearchValueChange: handleAdoptSearchValueChange,
-                    }}
-                    popoverProps={{ isFullWidth: true }}
-                    currentSelection={adoptTargets}
-                  >
-                    <Multiselect.Option
-                      key="select-all-global-en"
-                      value={SELECT_ALL_GLOBAL_EN_VALUE}
-                      label={`Select all Global EN (${globalEnAdoptLocales.length})`}
-                      onSelectItem={handleSelectAdoptItem}
-                      itemId="select-all-global-en"
-                      isChecked={
-                        selectAllGlobalEn &&
-                        adoptTargets.length === globalEnAdoptLocales.length &&
-                        globalEnAdoptLocales.length > 0
-                      }
-                    />
-
-                    {/* Optional visual divider */}
-                    <div
-                      style={{
-                        height: 1,
-                        background: "#e5e5e5",
-                        margin: "6px 0",
-                      }}
-                    />
-
-                    {filteredAdoptLocales.map((l, index) => (
-                      <Multiselect.Option
-                        key={`adopt-${l.sys.id}-${index}`}
-                        value={l.code}
-                        label={`${l.name} (${l.code})`}
-                        onSelectItem={handleSelectAdoptItem}
-                        itemId={`adopt-${l.sys.id}-${index}`}
-                        isChecked={adoptTargets.includes(l.code)}
-                        isDisabled={l.code === sourceLocale}
-                      />
-                    ))}
-                  </Multiselect>
-
-                  <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>
-                    If empty, adoption uses the target locale above (
-                    {targetLocale || "—"}).
-                  </div>
-                </div>
-
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
-                >
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 12 }}
-                  >
-                    <Button
-                      variant="positive"
-                      onClick={adoptChanges}
-                      isDisabled={isActionDisabled}
-                    >
-                      {adopting ? (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
-                          <Spinner size="small" />
-                          Adopting…
-                        </span>
-                      ) : adoptStatus === "success" ? (
-                        "Adopted ✓"
-                      ) : (
-                        "Merge Source → Target"
-                      )}
-                    </Button>
-
-                    {adopting && (
-                      <div
-                        style={{
-                          display: "inline-block",
-                          width: 120,
-                          height: 6,
-                          background: "#e0e0e0",
-                          borderRadius: 3,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "40%",
-                            height: "100%",
-                            background: "#0059C8",
-                            borderRadius: 3,
-                            animation:
-                              "adoptProgress 1.2s ease-in-out infinite",
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {adopting && (
-                    <div style={{ fontSize: 12, color: "#666" }}>
-                      Estimated total time: {formatDuration(estimatedTotalMs)}
-                      <br />
-                      Elapsed: {formatDuration(elapsedMs)}
-                      <br />
-                      Remaining: {formatDuration(remainingMs)}
-                    </div>
-                  )}
-
-                  {adoptMsg && (
-                    <Note variant={noteVariant} title={noteTitle}>
-                      <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-                        {adoptMsg}
-                      </pre>
-
-                      {adoptStatus === "success" &&
-                        actualDurationMs != null && (
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "#666",
-                              marginTop: 8,
-                            }}
-                          >
-                            Completed in {formatDuration(actualDurationMs)}.
-                            {savedMs != null &&
-                              ` Estimated time saved: ${formatDuration(savedMs)}.`}
-                          </div>
-                        )}
-                    </Note>
-                  )}
-                </div>
-              </div>
-            </Note>
-          </div>
-        );
-
-        return (
-          <>
-            {actionPanel}
-
-            <DiffChecker
-              diffTree={diffData}
-              spaceId={spaceId}
-              environmentId={environmentId}
-              entryId={entryId}
-              selected={selected}
-              onToggleField={onToggleField}
-              adoptAll={adoptAll}
-              overwriteAll={overwriteAll}
-              overwriteSelected={overwriteSelected}
-              onToggleOverwrite={onToggleOverwrite}
-            />
-
-            {actionPanel}
-          </>
-        );
-      })()}
     </div>
   );
-};
-
-export default Dialog;
+}
