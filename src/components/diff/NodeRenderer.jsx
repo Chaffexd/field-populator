@@ -20,6 +20,7 @@ import {
   FrontendTagsRenderer,
   RelatedProductPortfolioRenderer,
   MainImageAssetRenderer,
+  CategoryUrlRenderer,
   PromoBanner,
   RichTextDiffWithEmbeddedRefs,
   SecondaryFeatures,
@@ -302,6 +303,25 @@ export function NodeRenderer({
   if (node.type === "field" && (fieldKey === "mainImageasset" || fieldKey === "downloadReference")) {
     return (
       <MainImageAssetRenderer
+        fieldKey={fieldKey}
+        node={node}
+        level={level}
+        spaceId={spaceId}
+        environmentId={environmentId}
+        entryId={entryId}
+        selected={selected}
+        onToggleField={onToggleField}
+        adoptAll={adoptAll}
+        overwriteAll={overwriteAll}
+        overwriteSelected={overwriteSelected}
+        onToggleOverwrite={onToggleOverwrite}
+      />
+    );
+  }
+
+  if (node.type === "field" && fieldKey === "categoryUrl") {
+    return (
+      <CategoryUrlRenderer
         fieldKey={fieldKey}
         node={node}
         level={level}

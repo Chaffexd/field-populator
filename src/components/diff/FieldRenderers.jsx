@@ -1344,6 +1344,123 @@ export function FeaturedSolutions({ value }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* CategoryUrlRenderer — ctaURL + pageLink object                             */
+/* -------------------------------------------------------------------------- */
+export function CategoryUrlRenderer({
+  fieldKey,
+  node,
+  level,
+  spaceId,
+  environmentId,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+  overwriteAll,
+  overwriteSelected,
+  onToggleOverwrite,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const parse = (raw) => {
+    if (!raw) return null;
+    if (typeof raw === "object") return raw;
+    try { return JSON.parse(raw); } catch { return null; }
+  };
+
+  const source = parse(node.source);
+  const target = parse(node.target);
+  const changed = JSON.stringify(source) !== JSON.stringify(target);
+
+  const fieldUrl =
+    spaceId && environmentId && entryId
+      ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(fieldKey)}`
+      : null;
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
+  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
+
+  const renderCard = (val) => {
+    if (!val) return <div style={fieldBoxStyle}>(empty)</div>;
+    const { ctaURL, pageLink } = val;
+    return (
+      <div style={{ ...fieldBoxStyle, display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+        {ctaURL ? (
+          <div>
+            <strong>CTA URL:</strong>{" "}
+            <a href={ctaURL} target="_blank" rel="noopener noreferrer">{ctaURL}</a>
+          </div>
+        ) : (
+          <div style={{ color: "#999" }}>CTA URL: (none)</div>
+        )}
+        {pageLink ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div><strong>Slug:</strong> {pageLink.slug || "(none)"}</div>
+            <div><strong>Type:</strong> {pageLink.type || "(none)"}</div>
+            {pageLink.locale && <div><strong>Locale:</strong> {pageLink.locale}</div>}
+          </div>
+        ) : (
+          <div style={{ color: "#999" }}>Page link: (none)</div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor: changed ? "#fffef8" : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <strong>
+          {fieldUrl ? (
+            <a href={fieldUrl} target="_blank" rel="noopener noreferrer">{fieldKey}</a>
+          ) : fieldKey}
+        </strong>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={mergeChecked}
+              disabled={overwriteAll}
+              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+            />
+            Merge
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={overwriteChecked}
+              disabled={overwriteAll}
+              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
+            />
+            Overwrite
+          </label>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>Source</em>
+          {renderCard(source)}
+        </div>
+        <div style={{ flex: 1 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>Target</em>
+          {renderCard(target)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* JSON_FIELDS — maps field API names to JSON-array renderers                 */
 /* -------------------------------------------------------------------------- */
 export const JSON_FIELDS = {
