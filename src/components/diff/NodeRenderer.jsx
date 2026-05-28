@@ -299,7 +299,7 @@ export function NodeRenderer({
   /* -------------------------------------------------------------------------- */
   /* 🔥 NEW — CUSTOM RENDERER FOR mainImageasset                                */
   /* -------------------------------------------------------------------------- */
-  if (node.type === "field" && fieldKey === "mainImageasset") {
+  if (node.type === "field" && (fieldKey === "mainImageasset" || fieldKey === "downloadReference")) {
     return (
       <MainImageAssetRenderer
         fieldKey={fieldKey}
