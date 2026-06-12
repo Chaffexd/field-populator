@@ -7,11 +7,12 @@ export default function LocaleSelectors({
   sourceLocale,
   targetLocale,
   allowedBases,
+  pinnedTargets,
   onSourceChange,
   onTargetChange,
 }) {
   const filteredTargets = locales.filter((l) =>
-    isPairAllowed(sourceLocale, l.code, allowedBases),
+    isPairAllowed(sourceLocale, l.code, allowedBases, pinnedTargets),
   );
 
   return (

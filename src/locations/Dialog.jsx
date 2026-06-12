@@ -8,6 +8,7 @@ import { callCMA } from "../lib/rateLimiter";
 import {
   isPairAllowed,
   ALLOWED_BASES_DEFAULT,
+  PINNED_TARGET_LOCALES,
 } from "../lib/localeUtils";
 import LocaleSelectors from "../components/LocaleSelectors";
 import MergeControls from "../components/MergeControls";
@@ -54,6 +55,7 @@ export default function Dialog() {
   // Read installation config with fallbacks for backwards compatibility
   const installParams = sdk.parameters?.installation ?? {};
   const allowedBases = installParams.allowedBases ?? ALLOWED_BASES_DEFAULT;
+  const pinnedTargets = new Set(installParams.pinnedTargets ?? Array.from(PINNED_TARGET_LOCALES));
   const hiddenFields = installParams.hiddenFields ?? HIDDEN_FIELDS_DEFAULT;
   const defaultSourceLocale = installParams.defaultSourceLocale ?? undefined;
   const defaultTargetLocale = installParams.defaultTargetLocale ?? undefined;
@@ -269,7 +271,7 @@ export default function Dialog() {
 
       for (const tgt of targets) {
         if (tgt === sourceLocale) continue;
-        if (!isPairAllowed(sourceLocale, tgt, allowedBases)) continue;
+        if (!isPairAllowed(sourceLocale, tgt, allowedBases, pinnedTargets)) continue;
         const summary = await adoptEntryTree({
           cma, entryId, environmentId, spaceId,
           sourceLocale, targetLocale: tgt, defaultLocale,
@@ -335,10 +337,10 @@ export default function Dialog() {
 
   const handleSourceChange = (v) => {
     setSourceLocale(v);
-    if (targetLocale && !isPairAllowed(v, targetLocale, allowedBases)) {
+    if (targetLocale && !isPairAllowed(v, targetLocale, allowedBases, pinnedTargets)) {
       setTargetLocale(undefined);
     }
-    setAdoptTargets((prev) => prev.filter((code) => isPairAllowed(v, code, allowedBases)));
+    setAdoptTargets((prev) => prev.filter((code) => isPairAllowed(v, code, allowedBases, pinnedTargets)));
   };
 
   const hasSelection =
@@ -410,6 +412,7 @@ export default function Dialog() {
         sourceLocale={sourceLocale}
         targetLocale={targetLocale}
         allowedBases={allowedBases}
+        pinnedTargets={pinnedTargets}
         onSourceChange={handleSourceChange}
         onTargetChange={setTargetLocale}
       />

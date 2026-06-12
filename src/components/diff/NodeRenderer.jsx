@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { toDiffableString, parseJsonAssetField } from "../../lib/helpers";
+import { toDiffableString, parseJsonAssetField, isRichTextDocument } from "../../lib/helpers";
 import {
   asString,
   parseJsonOnce,
@@ -21,6 +21,8 @@ import {
   RelatedProductPortfolioRenderer,
   MainImageAssetRenderer,
   CategoryUrlRenderer,
+  RichTextObjectRenderer,
+  ServiceDeliverySummaryRenderer,
   PromoBanner,
   RichTextDiffWithEmbeddedRefs,
   SecondaryFeatures,
@@ -300,7 +302,7 @@ export function NodeRenderer({
   /* -------------------------------------------------------------------------- */
   /* 🔥 NEW — CUSTOM RENDERER FOR mainImageasset                                */
   /* -------------------------------------------------------------------------- */
-  if (node.type === "field" && (fieldKey === "mainImageasset" || fieldKey === "downloadReference")) {
+  if (node.type === "field" && (fieldKey === "mainImageasset" || fieldKey === "downloadReference" || fieldKey === "audioAsset")) {
     return (
       <MainImageAssetRenderer
         fieldKey={fieldKey}
@@ -338,6 +340,25 @@ export function NodeRenderer({
     );
   }
 
+  if (node.type === "field" && (fieldKey === "serviceDeliverySummary" || fieldKey === "benefits" || fieldKey === "featuredContent")) {
+    return (
+      <ServiceDeliverySummaryRenderer
+        fieldKey={fieldKey}
+        node={node}
+        level={level}
+        spaceId={spaceId}
+        environmentId={environmentId}
+        entryId={entryId}
+        selected={selected}
+        onToggleField={onToggleField}
+        adoptAll={adoptAll}
+        overwriteAll={overwriteAll}
+        overwriteSelected={overwriteSelected}
+        onToggleOverwrite={onToggleOverwrite}
+      />
+    );
+  }
+
   if (node.type === "template" || node.type === "article") {
     const entryUrl =
       spaceId && environmentId && node.entryId
@@ -357,6 +378,67 @@ export function NodeRenderer({
         />
       </div>
     );
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* AUTO-DETECT: shape-based routing for unregistered field names          */
+  /* ---------------------------------------------------------------------- */
+  if (node.type === "field") {
+    const sample = parseJsonOnce(node.source) ?? parseJsonOnce(node.target);
+
+    // Asset object: { assetUrl, assetType, ... }
+    if (sample && typeof sample === "object" && !Array.isArray(sample) && "assetUrl" in sample) {
+      return (
+        <MainImageAssetRenderer
+          fieldKey={fieldKey} node={node} level={level}
+          spaceId={spaceId} environmentId={environmentId} entryId={entryId}
+          selected={selected} onToggleField={onToggleField}
+          adoptAll={adoptAll} overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected} onToggleOverwrite={onToggleOverwrite}
+        />
+      );
+    }
+
+    // Array of objects where first item has a `text` rich text doc
+    if (Array.isArray(sample) && sample.length > 0 && isRichTextDocument(sample[0]?.text)) {
+      return (
+        <ServiceDeliverySummaryRenderer
+          fieldKey={fieldKey} node={node} level={level}
+          spaceId={spaceId} environmentId={environmentId} entryId={entryId}
+          selected={selected} onToggleField={onToggleField}
+          adoptAll={adoptAll} overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected} onToggleOverwrite={onToggleOverwrite}
+        />
+      );
+    }
+
+    // CTA/pageLink object: { ctaURL, pageLink: { slug, type, locale } }
+    if (sample && typeof sample === "object" && !Array.isArray(sample) && ("ctaURL" in sample || "pageLink" in sample)) {
+      return (
+        <CategoryUrlRenderer
+          fieldKey={fieldKey} node={node} level={level}
+          spaceId={spaceId} environmentId={environmentId} entryId={entryId}
+          selected={selected} onToggleField={onToggleField}
+          adoptAll={adoptAll} overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected} onToggleOverwrite={onToggleOverwrite}
+        />
+      );
+    }
+
+    // Object where at least one value is a rich text doc: { quote: richTextDoc, ... }
+    if (sample && typeof sample === "object" && !Array.isArray(sample)) {
+      if (Object.values(sample).some((v) => isRichTextDocument(v))) {
+        return (
+          <RichTextObjectRenderer
+            fieldKey={fieldKey} node={node} level={level}
+            spaceId={spaceId} environmentId={environmentId} entryId={entryId}
+            selected={selected} onToggleField={onToggleField}
+            adoptAll={adoptAll} overwriteAll={overwriteAll}
+            overwriteSelected={overwriteSelected} onToggleOverwrite={onToggleOverwrite}
+          />
+        );
+      }
+    }
   }
 
   /* ---------------------------------------------------------------------- */

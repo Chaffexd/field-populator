@@ -1,8 +1,8 @@
 export const PINNED_TARGET_LOCALES = new Set(["zu-ZA"]);
 
-export const ALLOWED_BASES_DEFAULT = [
-  "en","de","es","nl","it","ar","fr","zh","ja","ko","pl","pt","ru","uk",
-];
+// Empty by default = no restrictions. Add entries to restrict which source base
+// languages are permitted (target must share the same base as source).
+export const ALLOWED_BASES_DEFAULT = [];
 
 export function isPairAllowed(
   sourceCode,
@@ -13,9 +13,13 @@ export function isPairAllowed(
   if (!sourceCode || !targetCode) return false;
   if (pinnedTargets.has(targetCode)) return true;
 
+  const basesSet = allowedBases instanceof Set ? allowedBases : new Set(allowedBases);
+
+  // No restrictions configured — allow any pair
+  if (basesSet.size === 0) return true;
+
   const srcBase = sourceCode.split("-")[0];
   const tgtBase = targetCode.split("-")[0];
-  const basesSet = allowedBases instanceof Set ? allowedBases : new Set(allowedBases);
 
   if (!basesSet.has(srcBase)) return false;
   if (srcBase !== tgtBase) return false;

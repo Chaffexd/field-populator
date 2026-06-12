@@ -1,7 +1,7 @@
 import { createClient } from "contentful-management";
 
 export const cmaSDK = (sdk) => createClient(
-  { accessToken: "" },
+  { accessToken: import.meta.env.VITE_CMA_KEY },
   {
     type: "plain",
     defaults: {

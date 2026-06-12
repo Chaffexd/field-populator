@@ -34,8 +34,10 @@ export default function ConfigScreen() {
   const [defaultSourceLocale, setDefaultSourceLocale] = useState("");
   const [defaultTargetLocale, setDefaultTargetLocale] = useState("");
   const [allowedBases, setAllowedBases] = useState([...ALLOWED_BASES_DEFAULT]);
+  const [pinnedTargets, setPinnedTargets] = useState([...PINNED_TARGET_LOCALES]);
   const [hiddenFields, setHiddenFields] = useState([...HIDDEN_FIELDS_DEFAULT]);
   const [newBase, setNewBase] = useState("");
+  const [newPinned, setNewPinned] = useState("");
   const [newField, setNewField] = useState("");
   const [saveNote, setSaveNote] = useState(null);
 
@@ -44,9 +46,10 @@ export default function ConfigScreen() {
       defaultSourceLocale: defaultSourceLocale || null,
       defaultTargetLocale: defaultTargetLocale || null,
       allowedBases,
+      pinnedTargets,
       hiddenFields,
     }),
-    [defaultSourceLocale, defaultTargetLocale, allowedBases, hiddenFields],
+    [defaultSourceLocale, defaultTargetLocale, allowedBases, pinnedTargets, hiddenFields],
   );
 
   useEffect(() => {
@@ -75,6 +78,7 @@ export default function ConfigScreen() {
         if (params.defaultSourceLocale) setDefaultSourceLocale(params.defaultSourceLocale);
         if (params.defaultTargetLocale) setDefaultTargetLocale(params.defaultTargetLocale);
         if (Array.isArray(params.allowedBases)) setAllowedBases(params.allowedBases);
+        if (Array.isArray(params.pinnedTargets)) setPinnedTargets(params.pinnedTargets);
         if (Array.isArray(params.hiddenFields)) setHiddenFields(params.hiddenFields);
       }
 
@@ -101,6 +105,17 @@ export default function ConfigScreen() {
 
   const removeBase = (base) =>
     setAllowedBases((prev) => prev.filter((b) => b !== base));
+
+  const addPinned = () => {
+    const trimmed = newPinned.trim();
+    if (trimmed && !pinnedTargets.includes(trimmed)) {
+      setPinnedTargets((prev) => [...prev, trimmed]);
+    }
+    setNewPinned("");
+  };
+
+  const removePinned = (code) =>
+    setPinnedTargets((prev) => prev.filter((c) => c !== code));
 
   const addField = () => {
     const trimmed = newField.trim();
@@ -172,13 +187,8 @@ export default function ConfigScreen() {
         <div style={{ borderBottom: "1px solid #e5e5e5", paddingBottom: 24, marginBottom: 24 }}>
           <Heading as="h3">Locale Pairing Rules</Heading>
           <Paragraph>
-            Allowed source base language codes. Target must share the same base.{" "}
-            Always allowed:{" "}
-            {Array.from(PINNED_TARGET_LOCALES).map((c) => (
-              <code key={c} style={{ background: "#f3f3f3", padding: "1px 5px", borderRadius: 3, fontSize: 12 }}>
-                {c}
-              </code>
-            ))}
+            By default all locale pairings are allowed. Add base language codes here to restrict — only source locales matching an entry will be permitted, and the target must share the same base.
+            Disregarded locales are always permitted regardless of this list.
           </Paragraph>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
             {allowedBases.map((base) => (
@@ -198,6 +208,41 @@ export default function ConfigScreen() {
               style={{ width: 120 }}
             />
             <Button size="small" variant="secondary" onClick={addBase}>Add</Button>
+          </div>
+        </div>
+
+        {/* Disregarded Locales */}
+        <div style={{ borderBottom: "1px solid #e5e5e5", paddingBottom: 24, marginBottom: 24 }}>
+          <Heading as="h3">Disregarded Locales</Heading>
+          <Paragraph>
+            These target locales are always allowed, regardless of source base language.
+            Useful for locales like <code style={{ background: "#f3f3f3", padding: "1px 5px", borderRadius: 3, fontSize: 12 }}>zu-ZA</code> that aren't tied to a base.
+          </Paragraph>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {pinnedTargets.map((code) => (
+              <span key={code} style={pillStyle("blue")}>
+                {code}
+                <button onClick={() => removePinned(code)} style={removeBtn} aria-label={`Remove ${code}`}>✕</button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Select
+              value={newPinned}
+              onChange={(e) => setNewPinned(e.target.value)}
+              size="small"
+              style={{ width: 220 }}
+            >
+              <Select.Option value="">— pick a locale —</Select.Option>
+              {locales
+                .filter((l) => !pinnedTargets.includes(l.code))
+                .map((l) => (
+                  <Select.Option key={l.sys.id} value={l.code}>
+                    {l.name} ({l.code})
+                  </Select.Option>
+                ))}
+            </Select>
+            <Button size="small" variant="secondary" onClick={addPinned} isDisabled={!newPinned}>Add</Button>
           </div>
         </div>
 

@@ -1461,6 +1461,248 @@ export function CategoryUrlRenderer({
 }
 
 /* -------------------------------------------------------------------------- */
+/* RichTextObjectRenderer — object where some values are rich text docs       */
+/* e.g. { quote: richTextDoc, attribution: "Name" }                          */
+/* -------------------------------------------------------------------------- */
+export function RichTextObjectRenderer({
+  fieldKey,
+  node,
+  level,
+  spaceId,
+  environmentId,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+  overwriteAll,
+  overwriteSelected,
+  onToggleOverwrite,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const parse = (raw) => {
+    if (!raw) return null;
+    if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+    try { const p = JSON.parse(raw); return (p && typeof p === "object" && !Array.isArray(p)) ? p : null; } catch { return null; }
+  };
+
+  const source = parse(node.source);
+  const target = parse(node.target);
+  const changed = JSON.stringify(source) !== JSON.stringify(target);
+
+  const fieldUrl =
+    spaceId && environmentId && entryId
+      ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(fieldKey)}`
+      : null;
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
+  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
+
+  const renderObj = (val) => {
+    if (!val) return <div style={fieldBoxStyle}>(empty)</div>;
+    const entries = Object.entries(val).filter(([, v]) => v !== null && v !== undefined && v !== "");
+    if (entries.length === 0) return <div style={fieldBoxStyle}>(empty)</div>;
+    return (
+      <div style={fieldBoxStyle}>
+        {entries.map(([k, v]) => (
+          <div key={k} style={{ marginBottom: 8 }}>
+            {isRichTextDocument(v) ? (
+              <div>{documentToReactComponents(v)}</div>
+            ) : typeof v === "object" ? null : (
+              <div><strong style={{ color: "#555", fontSize: 12 }}>{k}:</strong>{" "}{String(v)}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor: changed ? "#fffef8" : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <strong>
+          {fieldUrl ? (
+            <a href={fieldUrl} target="_blank" rel="noopener noreferrer">{fieldKey}</a>
+          ) : fieldKey}
+        </strong>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={mergeChecked}
+              disabled={overwriteAll}
+              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+            />
+            Merge
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={overwriteChecked}
+              disabled={overwriteAll}
+              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
+            />
+            Overwrite
+          </label>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>Source</em>
+          {renderObj(source)}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>Target</em>
+          {renderObj(target)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* ServiceDeliverySummaryRenderer — array of { text: richTextDoc, ... }      */
+/* -------------------------------------------------------------------------- */
+export function ServiceDeliverySummaryRenderer({
+  fieldKey,
+  node,
+  level,
+  spaceId,
+  environmentId,
+  entryId,
+  selected,
+  onToggleField,
+  adoptAll,
+  overwriteAll,
+  overwriteSelected,
+  onToggleOverwrite,
+}) {
+  const indentStyle = { marginLeft: `${level * 20}px` };
+
+  const parse = (raw) => {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
+  };
+
+  const source = parse(node.source);
+  const target = parse(node.target);
+  const changed = JSON.stringify(source) !== JSON.stringify(target);
+
+  const fieldUrl =
+    spaceId && environmentId && entryId
+      ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(fieldKey)}`
+      : null;
+
+  const selectedSet = selected?.[entryId];
+  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
+  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
+  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
+
+  const renderSubValue = (k, v) => {
+    if (v === null || v === undefined || v === "") return <span style={{ color: "#999" }}>(none)</span>;
+    if (isRichTextDocument(v)) return <div style={{ fontSize: 12 }}>{documentToReactComponents(v)}</div>;
+    if (typeof v === "object" && v.assetUrl) return <span>{v.altText || v.assetName || "(asset)"}: <a href={v.assetUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>{v.assetUrl.slice(0, 60)}…</a></span>;
+    if (typeof v === "object") return <span style={{ color: "#999", fontSize: 12 }}>(object)</span>;
+    return <span>{String(v)}</span>;
+  };
+
+  const renderItem = (item, idx) => {
+    if (!item || typeof item !== "object") return <div key={idx} style={fieldBoxStyle}>{String(item)}</div>;
+    const { text, subhead, ...rest } = item;
+    const extraKeys = Object.entries(rest).filter(([, v]) => v !== "" && v !== null && v !== undefined);
+    return (
+      <div key={idx} style={{ ...fieldBoxStyle, marginBottom: 6, fontSize: 13 }}>
+        {text && isRichTextDocument(text) && <div>{documentToReactComponents(text)}</div>}
+        {subhead && isRichTextDocument(subhead) && (
+          <div style={{ marginTop: 6, borderTop: "1px solid #eee", paddingTop: 4 }}>
+            <em style={{ color: "#888", fontSize: 11 }}>subhead</em>
+            {documentToReactComponents(subhead)}
+          </div>
+        )}
+        {extraKeys.length > 0 && (
+          <div style={{ marginTop: 6, borderTop: "1px solid #eee", paddingTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
+            {extraKeys.map(([k, v]) => (
+              <div key={k} style={{ fontSize: 12 }}>
+                <strong style={{ color: "#555" }}>{k}:</strong>{" "}
+                {renderSubValue(k, v)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderList = (items) => {
+    if (!items || items.length === 0) return <div style={fieldBoxStyle}>(empty)</div>;
+    return <div>{items.map((item, idx) => renderItem(item, idx))}</div>;
+  };
+
+  return (
+    <div
+      style={{
+        marginBottom: 15,
+        padding: 10,
+        border: "1px solid #ddd",
+        borderRadius: 6,
+        backgroundColor: changed ? "#fffef8" : "#f6f6f6",
+        ...indentStyle,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <strong>
+          {fieldUrl ? (
+            <a href={fieldUrl} target="_blank" rel="noopener noreferrer">{fieldKey}</a>
+          ) : fieldKey}
+        </strong>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={mergeChecked}
+              disabled={overwriteAll}
+              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
+            />
+            Merge
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+            <input
+              type="checkbox"
+              checked={overwriteChecked}
+              disabled={overwriteAll}
+              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
+            />
+            Overwrite
+          </label>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>Source</em>
+          {renderList(source)}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <em style={{ color: "#666", marginBottom: 4, display: "block" }}>Target</em>
+          {renderList(target)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* JSON_FIELDS — maps field API names to JSON-array renderers                 */
 /* -------------------------------------------------------------------------- */
 export const JSON_FIELDS = {
