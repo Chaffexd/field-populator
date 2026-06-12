@@ -10,18 +10,16 @@ describe("isPairAllowed", () => {
     expect(isPairAllowed("en-US", undefined)).toBe(false);
   });
 
-  it("allows same-base region variants", () => {
+  it("allows any pair when allowedBases is empty (unrestricted default)", () => {
     expect(isPairAllowed("en-US", "en-GB")).toBe(true);
     expect(isPairAllowed("de-DE", "de-AT")).toBe(true);
+    expect(isPairAllowed("en-US", "de-DE")).toBe(true);
+    expect(isPairAllowed("en-US", "fr-FR")).toBe(true);
+    expect(isPairAllowed("xx-YY", "xx-ZZ")).toBe(true);
   });
 
   it("allows source → base-only target", () => {
     expect(isPairAllowed("en-US", "en")).toBe(true);
-  });
-
-  it("rejects cross-base pairs", () => {
-    expect(isPairAllowed("en-US", "de-DE")).toBe(false);
-    expect(isPairAllowed("en-US", "fr-FR")).toBe(false);
   });
 
   it("allows pinned target regardless of source base", () => {
@@ -34,7 +32,12 @@ describe("isPairAllowed", () => {
     expect(isPairAllowed("de-DE", "de-AT", ["de"])).toBe(true);
   });
 
+  it("rejects cross-base pairs when allowedBases is set", () => {
+    expect(isPairAllowed("en-US", "de-DE", ["en", "de"])).toBe(false);
+    expect(isPairAllowed("en-US", "fr-FR", ["en", "fr"])).toBe(false);
+  });
+
   it("rejects pair when source base not in allowedBases", () => {
-    expect(isPairAllowed("xx-YY", "xx-ZZ")).toBe(false);
+    expect(isPairAllowed("xx-YY", "xx-ZZ", ["en"])).toBe(false);
   });
 });
