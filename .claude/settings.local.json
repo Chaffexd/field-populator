@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(node:*)",
+      "Bash(/Users/shane.chaffe/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/scripts/start-server.sh *)",
+      "Bash(/Users/shane.chaffe/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/scripts/start-server.sh *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git rm *)",
+      "Bash(git restore *)",
+      "Bash(npm test *)",
+      "Bash(git *)"
     ]
   }
 }
