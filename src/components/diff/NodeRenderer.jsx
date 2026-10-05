@@ -1,4 +1,7 @@
 import React, { useState } from "react";
+import { FieldModeToggles } from "./FieldModeToggles";
+import { CardListDiff } from "./CardListDiff";
+import { isCardField } from "../../lib/cardMatch";
 import { toDiffableString, parseJsonAssetField, isRichTextDocument } from "../../lib/helpers";
 import {
   asString,
@@ -156,8 +159,6 @@ export function NodeRenderer({
           return null;
       }
     };
-    const jsonFieldOverwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-    const jsonFieldMergeChecked = !jsonFieldOverwriteChecked && (adoptAll || Boolean(selected?.[entryId]?.has(fieldKey)));
 
     return (
       <div
@@ -184,43 +185,48 @@ export function NodeRenderer({
         >
           <strong>{fieldKey}</strong>
 
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-              <input
-                type="checkbox"
-                checked={jsonFieldMergeChecked}
-                disabled={overwriteAll}
-                onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-              />
-              Merge
-            </label>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-              <input
-                type="checkbox"
-                checked={jsonFieldOverwriteChecked}
-                disabled={overwriteAll}
-                onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-              />
-              Overwrite
-            </label>
-          </div>
+          <FieldModeToggles
+            entryId={entryId}
+            fieldKey={fieldKey}
+            selected={selected}
+            adoptAll={adoptAll}
+            overwriteAll={overwriteAll}
+            overwriteSelected={overwriteSelected}
+            onToggleField={onToggleField}
+            onToggleOverwrite={onToggleOverwrite}
+          />
         </div>
 
-        <div style={{ display: "flex", gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
-              Source
-            </em>
-            {source.length === 0 ? "(empty)" : render(source)}
-          </div>
+        {isCardField(fieldKey) && Array.isArray(source) && Array.isArray(target) ? (
+          <CardListDiff
+            entryId={entryId}
+            fieldKey={fieldKey}
+            source={source}
+            target={target}
+            renderCard={(card) => render([card])}
+            disabledReason={
+              overwriteAll || overwriteSelected?.[entryId]?.has(fieldKey)
+                ? "Overwrite is on for this field, so the whole card list is replaced. Untick Overwrite to adopt individual cards."
+                : undefined
+            }
+          />
+        ) : (
+          <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+                Source
+              </em>
+              {source.length === 0 ? "(empty)" : render(source)}
+            </div>
 
-          <div style={{ flex: 1 }}>
-            <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
-              Target
-            </em>
-            {target.length === 0 ? "(empty)" : render(target)}
+            <div style={{ flex: 1 }}>
+              <em style={{ color: "#666", marginBottom: 4, display: "block" }}>
+                Target
+              </em>
+              {target.length === 0 ? "(empty)" : render(target)}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -469,12 +475,6 @@ export function NodeRenderer({
       fieldKey,
     });
 
-    const selectedSet = selected?.[entryId];
-    const explicitlySelected = Boolean(
-      selectedSet && selectedSet.has(fieldKey)
-    );
-    const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-    const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
     const sourceAsset = parseJsonAssetField(node.source);
     const targetAsset = parseJsonAssetField(node.target);
@@ -538,26 +538,16 @@ export function NodeRenderer({
             )}
           </strong>
 
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-              <input
-                type="checkbox"
-                checked={mergeChecked}
-                disabled={overwriteAll}
-                onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-              />
-              Merge
-            </label>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-              <input
-                type="checkbox"
-                checked={overwriteChecked}
-                disabled={overwriteAll}
-                onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-              />
-              Overwrite
-            </label>
-          </div>
+          <FieldModeToggles
+            entryId={entryId}
+            fieldKey={fieldKey}
+            selected={selected}
+            adoptAll={adoptAll}
+            overwriteAll={overwriteAll}
+            overwriteSelected={overwriteSelected}
+            onToggleField={onToggleField}
+            onToggleOverwrite={onToggleOverwrite}
+          />
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>

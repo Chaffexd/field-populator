@@ -12,6 +12,9 @@ const mockSdk = {
     space: "vvbytozt5evi",
   },
   parameters: {
+    installation: {
+      cmaToken: "cfpat-from-install-params",
+    },
     invocation: {
       entryId: "entry-1",
       environmentId: "master",
@@ -32,8 +35,10 @@ vi.mock("@contentful/react-apps-toolkit", () => ({
   useSDK: () => mockSdk,
 }));
 
+const cmaSDKMock = vi.fn(() => mockCma);
+
 vi.mock("../lib/contentful", () => ({
-  cmaSDK: () => mockCma,
+  cmaSDK: (...args) => cmaSDKMock(...args),
 }));
 
 vi.mock("../lib/buildDiffTree", () => ({
@@ -248,5 +253,10 @@ describe("Dialog — per-field overwrite (overwriteSelected)", () => {
         }),
       ),
     );
+  });
+  it("builds the CMA client with the token from installation parameters", async () => {
+    await renderAndSelectLocales();
+
+    expect(cmaSDKMock).toHaveBeenCalledWith(mockSdk, "cfpat-from-install-params");
   });
 });

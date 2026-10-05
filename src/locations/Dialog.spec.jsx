@@ -166,6 +166,7 @@ describe("Dialog component", () => {
         adoptAll: true,
         overwriteAll: false,
         overwriteSelected: {},
+        cardSelected: {},
       }),
     );
 

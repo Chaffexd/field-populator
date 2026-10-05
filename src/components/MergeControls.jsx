@@ -28,6 +28,7 @@ export default function MergeControls({
   sourceLocale,
   targetLocale,
   adoptTargets,
+  writeTargets = [],
   allowedBases,
   onAdoptTargetsChange,
 }) {
@@ -39,18 +40,22 @@ export default function MergeControls({
       ? "warning"
       : adoptStatus === "success"
         ? "positive"
-        : adoptStatus === "error"
-          ? "negative"
-          : "primary";
+        : adoptStatus === "partial"
+          ? "warning"
+          : adoptStatus === "error"
+            ? "negative"
+            : "primary";
 
   const noteTitle =
     adoptStatus === "running"
       ? "Adopting changes…"
       : adoptStatus === "success"
         ? "Adoption complete"
-        : adoptStatus === "error"
-          ? "Adoption failed"
-          : "Do you wish to merge these changes?";
+        : adoptStatus === "partial"
+          ? "Adoption partly failed"
+          : adoptStatus === "error"
+            ? "Adoption failed"
+            : "Do you wish to merge these changes?";
 
   return (
     <div style={{ margin: 20 }}>
@@ -89,6 +94,16 @@ export default function MergeControls({
           />
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {writeTargets.length > 0 && (
+              <div data-test-id="write-targets" style={{ fontSize: 13 }}>
+                <strong>
+                  Will write to {writeTargets.length} locale
+                  {writeTargets.length === 1 ? "" : "s"}:
+                </strong>{" "}
+                {writeTargets.join(", ")}
+              </div>
+            )}
+
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <Button variant="positive" onClick={onAdopt} isDisabled={isDisabled}>
                 {adopting ? (
