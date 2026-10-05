@@ -1,5 +1,6 @@
 import React from "react";
 import { NodeRenderer } from "./diff/NodeRenderer";
+import { CardSelectionContext } from "./diff/CardListDiff";
 
 export default function DiffChecker({
   diffTree,
@@ -12,11 +13,17 @@ export default function DiffChecker({
   overwriteAll,
   overwriteSelected,
   onToggleOverwrite,
+  cardSelected,
+  onToggleCard,
+  onToggleAddMissing,
   hiddenFields,
 }) {
   if (!diffTree) return null;
 
   return (
+    <CardSelectionContext.Provider
+      value={{ cardSelected, onToggleCard, onToggleAddMissing }}
+    >
     <div style={{ margin: 20 }}>
       {Object.entries(diffTree).map(([key, node]) => (
         <NodeRenderer
@@ -37,5 +44,6 @@ export default function DiffChecker({
         />
       ))}
     </div>
+    </CardSelectionContext.Provider>
   );
 }

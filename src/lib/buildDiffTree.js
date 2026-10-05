@@ -119,7 +119,8 @@ export async function buildDiffTree({
         continue;
       }
 
-      const chosenId = srcId || tgtId;
+      // Prefer the target's link: merge keeps it, so that's the subtree adopt walks
+      const chosenId = tgtId || srcId;
 
       let referencedEntry = cache[chosenId];
       if (!referencedEntry) {

@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Note, Spinner } from "@contentful/f36-components";
 import { useSDK } from "@contentful/react-apps-toolkit";
 import { cmaSDK } from "../lib/contentful";
 import { buildDiffTree } from "../lib/buildDiffTree";
 import { adoptEntryTree } from "../lib/adoptTree";
+import { describeCmaError } from "../lib/cmaErrors";
 import { callCMA } from "../lib/rateLimiter";
 import {
   isPairAllowed,
@@ -46,14 +47,55 @@ function collectFields(tree, rootEntryId) {
   return result;
 }
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * Plain-text adopt report. One line per target locale when there is more
+ * than one locale or anything failed, so partial success is never hidden.
+ */
+export function formatAdoptReport(results) {
+  const attempted = results.filter((r) => !r.skipped);
+  const fields = attempted.reduce((n, r) => n + r.changedFields, 0);
+  const entries = attempted.reduce((n, r) => n + r.updatedEntries, 0);
+  const failed = attempted.filter((r) => r.failures.length > 0);
+
+  const headline =
+    failed.length === 0
+      ? `Adopted ${plural(fields, "field")} across ${entries} entries (${attempted.map((r) => r.locale).join(", ")}).`
+      : `${failed.length} of ${attempted.length} locale${attempted.length === 1 ? "" : "s"} had failures. ` +
+        `${plural(fields, "field")} across ${entries} entries were still saved — ` +
+        "locales marked ✓ are complete.\n" +
+        "If reporting this issue, include the request IDs below.";
+
+  const anySkips = attempted.some((r) => r.cardSkips?.length > 0);
+  if (results.length === 1 && failed.length === 0 && !anySkips) return headline;
+
+  const lines = results.map((r) => {
+    if (r.skipped) return `– ${r.locale}: skipped (${r.skipped})`;
+    const saved = `${plural(r.changedFields, "field")} across ${r.updatedEntries} entries`;
+    // Ticked cards this locale had no match for: not written, not an error.
+    const skips = (r.cardSkips ?? []).map(
+      (x) => `\n    ↷ ${x.fieldId} card ${x.card} not written: ${x.reason}`,
+    ).join("");
+    if (r.failures.length === 0) return `✓ ${r.locale}: ${saved}${skips}`;
+    const detail = r.failures
+      .map((f) => `    • ${f.entryId}: ${f.reason}${f.requestId ? ` (Request ID: ${f.requestId})` : ""}`)
+      .join("\n");
+    return `✗ ${r.locale}: ${plural(r.failures.length, "entry")} failed, ${saved} saved\n${detail}${skips}`;
+  });
+
+  return `${headline}\n\n${lines.join("\n")}`;
+}
+
 export default function Dialog() {
   const sdk = useSDK();
-  const cma = useMemo(() => {
-    try { return cmaSDK(sdk); } catch { return null; }
-  }, [sdk]);
 
   // Read installation config with fallbacks for backwards compatibility
   const installParams = sdk.parameters?.installation ?? {};
+  const cmaToken = installParams.cmaToken;
+  const cma = useMemo(() => {
+    try { return cmaSDK(sdk, cmaToken); } catch { return null; }
+  }, [sdk, cmaToken]);
   const allowedBases = installParams.allowedBases ?? ALLOWED_BASES_DEFAULT;
   const pinnedTargets = new Set(installParams.pinnedTargets ?? Array.from(PINNED_TARGET_LOCALES));
   const hiddenFields = installParams.hiddenFields ?? HIDDEN_FIELDS_DEFAULT;
@@ -75,12 +117,18 @@ export default function Dialog() {
   const [diffData, setDiffData] = useState(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState(null);
+  // Bumped by every diff load. A load whose number is no longer current was
+  // for a locale pair the user has since moved away from, so it is dropped
+  // instead of overwriting the diff for the pair in the dropdowns.
+  const diffRequestRef = useRef(0);
 
   const [adoptAll, setAdoptAll] = useState(false);
   const [overwriteAll, setOverwriteAll] = useState(false);
   const [allFields, setAllFields] = useState([]);
   const [selected, setSelected] = useState({});
   const [overwriteSelected, setOverwriteSelected] = useState({});
+  // { [entryId]: { [fieldId]: { picks: { [cardIndex]: card }, addMissing } } }
+  const [cardSelected, setCardSelected] = useState({});
   const [adoptTargets, setAdoptTargets] = useState([]);
 
   const [adopting, setAdopting] = useState(false);
@@ -103,7 +151,8 @@ export default function Dialog() {
   // Load locales on mount
   useEffect(() => {
     if (!cma) {
-      setLocalesError("CMA client could not be initialised — check VITE_CMA_KEY in your .env file.");
+      setLocalesError("No Contentful Management token configured — open the Locale Populator app's "
+        + "configuration screen and add one, then reopen this dialog.");
       setLocalesLoading(false);
       return;
     }
@@ -137,6 +186,8 @@ export default function Dialog() {
 
   // Load diff when locale pair changes
   useEffect(() => {
+    const requestId = ++diffRequestRef.current;
+    const isCurrent = () => requestId === diffRequestRef.current;
     const run = async () => {
       if (!sourceLocale || !targetLocale) return;
       try {
@@ -149,13 +200,14 @@ export default function Dialog() {
           defaultLocale: locales.find((l) => l.default)?.code,
           cache: {}, visited: new Set(), maxDepth: 4, maxNodes: 250,
         });
+        if (!isCurrent()) return;
         setDiffData(tree);
         setAllFields(collectFields(tree, entryId));
         setDiffError(null);
       } catch {
-        setDiffError("Failed to fetch entry for diff");
+        if (isCurrent()) setDiffError("Failed to fetch entry for diff");
       } finally {
-        setDiffLoading(false);
+        if (isCurrent()) setDiffLoading(false);
       }
     };
     run();
@@ -177,10 +229,20 @@ export default function Dialog() {
     setAdoptMsg(null);
   }, [sourceLocale, targetLocale, overwriteAll]);
 
-  // Reset per-field overwrite when locale pair changes
+  // Reset per-field overwrite and card picks when locale pair changes
   useEffect(() => {
     setOverwriteSelected({});
+    setCardSelected({});
   }, [sourceLocale, targetLocale]);
+
+  const removeFromSet = (setter, entryIdForField, fieldId) =>
+    setter((prev) => {
+      const next = { ...prev };
+      const set = new Set(next[entryIdForField] || []);
+      set.delete(fieldId);
+      next[entryIdForField] = set;
+      return next;
+    });
 
   const onToggleField = (entryIdForField, fieldId, isChecked) => {
     if (adoptAll && !isChecked) {
@@ -197,13 +259,7 @@ export default function Dialog() {
       return;
     }
     if (isChecked) {
-      setOverwriteSelected((prev) => {
-        const next = { ...prev };
-        const set = new Set(next[entryIdForField] || []);
-        set.delete(fieldId);
-        next[entryIdForField] = set;
-        return next;
-      });
+      removeFromSet(setOverwriteSelected, entryIdForField, fieldId);
     }
     setSelected((prev) => {
       const next = { ...prev };
@@ -228,13 +284,7 @@ export default function Dialog() {
       });
     }
     if (isChecked) {
-      setSelected((prev) => {
-        const next = { ...prev };
-        const set = new Set(next[entryIdForField] || []);
-        set.delete(fieldId);
-        next[entryIdForField] = set;
-        return next;
-      });
+      removeFromSet(setSelected, entryIdForField, fieldId);
     }
     setOverwriteSelected((prev) => {
       const next = { ...prev };
@@ -245,10 +295,34 @@ export default function Dialog() {
     });
   };
 
+  const updateCardChoice = (entryIdForField, fieldId, update) =>
+    setCardSelected((prev) => {
+      const forEntry = prev[entryIdForField] || {};
+      const current = forEntry[fieldId] || { picks: {}, addMissing: false };
+      return {
+        ...prev,
+        [entryIdForField]: { ...forEntry, [fieldId]: update(current) },
+      };
+    });
+
+  // The card itself is stored so adopt can refuse if the source card changed
+  // after it was ticked.
+  const onToggleCard = (entryIdForField, fieldId, index, card, isChecked) =>
+    updateCardChoice(entryIdForField, fieldId, (current) => {
+      const picks = { ...current.picks };
+      if (isChecked) picks[index] = card; else delete picks[index];
+      return { ...current, picks };
+    });
+
+  const onToggleAddMissing = (entryIdForField, fieldId, isChecked) =>
+    updateCardChoice(entryIdForField, fieldId, (current) => ({
+      ...current,
+      addMissing: isChecked,
+    }));
+
   const adoptChanges = async () => {
     if (!sourceLocale) return;
-    const targets =
-      adoptTargets.length > 0 ? adoptTargets : targetLocale ? [targetLocale] : [];
+    const targets = writeTargets;
     if (targets.length === 0) return;
 
     setAdoptStartedAt(performance.now());
@@ -264,74 +338,86 @@ export default function Dialog() {
     const defaultLocale = locales.find((l) => l.default)?.code;
     console.log("Overwrite all:", overwriteAll);
 
+    // One result per target locale. A locale that throws, or that has entries
+    // which failed, doesn't stop the others; everything is reported at the end
+    // so "failed" never hides writes that did happen.
+    const results = [];
     try {
-      let totalChangedFields = 0;
-      let totalUpdatedEntries = 0;
-      let totalTraversed = 0;
-
       for (const tgt of targets) {
-        if (tgt === sourceLocale) continue;
-        if (!isPairAllowed(sourceLocale, tgt, allowedBases, pinnedTargets)) continue;
-        const summary = await adoptEntryTree({
-          cma, entryId, environmentId, spaceId,
-          sourceLocale, targetLocale: tgt, defaultLocale,
-          selected, adoptAll, overwriteAll, overwriteSelected,
-        });
-        totalChangedFields += summary.changedFields;
-        totalUpdatedEntries += summary.updatedEntries;
-        totalTraversed += summary.traversedEntries ?? 0;
+        if (tgt === sourceLocale) {
+          results.push({ locale: tgt, skipped: "same as source" });
+          continue;
+        }
+        if (!isPairAllowed(sourceLocale, tgt, allowedBases, pinnedTargets)) {
+          results.push({ locale: tgt, skipped: "pair not allowed" });
+          continue;
+        }
+        try {
+          const summary = await adoptEntryTree({
+            cma, entryId, environmentId, spaceId,
+            sourceLocale, targetLocale: tgt, defaultLocale,
+            selected, adoptAll, overwriteAll, overwriteSelected,
+            cardSelected,
+          });
+          results.push({
+            locale: tgt, ...summary,
+            failures: summary.failures ?? [], cardSkips: summary.cardSkips ?? [],
+          });
+        } catch (err) {
+          results.push({
+            locale: tgt, changedFields: 0, updatedEntries: 0, traversedEntries: 0,
+            failures: [{ entryId, ...describeCmaError(err) }], cardSkips: [],
+          });
+        }
       }
+    } finally {
+      setAdopting(false);
+      setAdoptStartedAt(null);
+    }
 
-      const overallMs = performance.now() - overallStart;
-      console.log(
-        `[ADOPT TOTAL] ${targets.join(", ")} | ${totalTraversed} entries traversed | ` +
-          `${totalUpdatedEntries} entries updated | ${totalChangedFields} fields | ` +
-          `${(overallMs / 1000).toFixed(2)}s`,
-      );
-      setActualDurationMs(overallMs);
-      setSavedMs(Math.max(0, targets.length * MANUAL_MS_PER_LOCALE - overallMs));
-      setAdoptMsg(
-        `Adopted ${totalChangedFields} field${totalChangedFields === 1 ? "" : "s"} across ${totalUpdatedEntries} entries (${targets.join(", ")}).`,
-      );
+    const overallMs = performance.now() - overallStart;
+    const attempted = results.filter((r) => !r.skipped);
+    const totalChangedFields = attempted.reduce((n, r) => n + r.changedFields, 0);
+    const totalUpdatedEntries = attempted.reduce((n, r) => n + r.updatedEntries, 0);
+    const totalTraversed = attempted.reduce((n, r) => n + (r.traversedEntries ?? 0), 0);
+    const failedLocales = attempted.filter((r) => r.failures.length > 0);
 
-      if (targetLocale) {
+    console.log(
+      `[ADOPT TOTAL] ${targets.join(", ")} | ${totalTraversed} entries traversed | ` +
+        `${totalUpdatedEntries} entries updated | ${totalChangedFields} fields | ` +
+        `${failedLocales.length} locale(s) with failures | ${(overallMs / 1000).toFixed(2)}s`,
+    );
+    setActualDurationMs(overallMs);
+    setSavedMs(Math.max(0, attempted.length * MANUAL_MS_PER_LOCALE - overallMs));
+    setAdoptMsg(formatAdoptReport(results));
+    setAdoptStatus(
+      failedLocales.length === 0
+        ? "success"
+        : totalUpdatedEntries > 0
+          ? "partial"
+          : "error",
+    );
+
+    // Refresh the diff so the user sees what was written. This runs after the
+    // status is set: a failed refresh says nothing about whether adopt worked.
+    if (targetLocale) {
+      const requestId = ++diffRequestRef.current;
+      try {
         const fresh = await cma.entry.get({ entryId, environmentId, spaceId });
         const tree = await buildDiffTree({
           entry: fresh, cma, sourceLocale, targetLocale, defaultLocale,
           cache: {}, visited: new Set(),
         });
-        setDiffData(tree);
-        setAllFields(collectFields(tree, entryId));
+        if (requestId === diffRequestRef.current) {
+          setDiffData(tree);
+          setAllFields(collectFields(tree, entryId));
+        }
+      } catch (err) {
+        console.warn("[Locale Populator] Adopt finished but the diff could not be refreshed:", err);
+        if (requestId === diffRequestRef.current) {
+          setDiffError("Adopt finished, but the diff could not be refreshed. Reopen the dialog to see the latest content.");
+        }
       }
-
-      setAdoptStatus("success");
-    } catch (err) {
-      const rawMsg = typeof err?.message === "string" ? err.message.trim() : "";
-      let parsed = null;
-      if (rawMsg.startsWith("{") && rawMsg.endsWith("}")) {
-        try { parsed = JSON.parse(rawMsg); } catch {}
-      }
-      const errors = Array.from(
-        new Set(
-          parsed?.details?.errors?.map((e) => e?.message).filter(Boolean) ??
-          err?.details?.errors?.map((e) => e?.message).filter(Boolean) ?? [],
-        ),
-      );
-      const BASE =
-        "Adoption failed. Please double check validation rules.\n" +
-        "If reporting this issue, include the requestId below.";
-      const messagesBlock =
-        errors.length > 0
-          ? errors.map((m) => `• ${m}`).join("\n")
-          : parsed?.message || rawMsg || "Unknown error";
-      const requestId = parsed?.requestId || err?.requestId;
-      setAdoptMsg(
-        `${BASE}\n\n${messagesBlock}${requestId ? `\n\nRequest ID: ${requestId}` : ""}`,
-      );
-      setAdoptStatus("error");
-    } finally {
-      setAdopting(false);
-      setAdoptStartedAt(null);
     }
   };
 
@@ -343,11 +429,27 @@ export default function Dialog() {
     setAdoptTargets((prev) => prev.filter((code) => isPairAllowed(v, code, allowedBases, pinnedTargets)));
   };
 
+  // A bulk selection made for one target shouldn't carry over to the next, or
+  // Adopt writes to locales picked for a different page view.
+  const handleTargetChange = (v) => {
+    setTargetLocale(v);
+    setAdoptTargets([]);
+  };
+
+  // The locale on screen plus the "additional locales" picker. Shown next to
+  // the Adopt button so the user sees exactly where it will write.
+  const writeTargets = Array.from(
+    new Set([targetLocale, ...adoptTargets].filter(Boolean)),
+  );
+
   const hasSelection =
     adoptAll ||
     overwriteAll ||
     Object.values(selected).some((s) => s.size > 0) ||
-    Object.values(overwriteSelected).some((s) => s.size > 0);
+    Object.values(overwriteSelected).some((s) => s.size > 0) ||
+    Object.values(cardSelected).some((fields) =>
+      Object.values(fields).some((c) => Object.keys(c.picks).length > 0),
+    );
 
   const isActionDisabled =
     adopting ||
@@ -398,6 +500,7 @@ export default function Dialog() {
       sourceLocale={sourceLocale}
       targetLocale={targetLocale}
       adoptTargets={adoptTargets}
+      writeTargets={writeTargets}
       allowedBases={allowedBases}
       onAdoptTargetsChange={setAdoptTargets}
     />
@@ -414,7 +517,7 @@ export default function Dialog() {
         allowedBases={allowedBases}
         pinnedTargets={pinnedTargets}
         onSourceChange={handleSourceChange}
-        onTargetChange={setTargetLocale}
+        onTargetChange={handleTargetChange}
       />
 
       {(diffData || diffLoading || diffError) && (
@@ -433,6 +536,9 @@ export default function Dialog() {
             overwriteAll={overwriteAll}
             overwriteSelected={overwriteSelected}
             onToggleOverwrite={onToggleOverwrite}
+            cardSelected={cardSelected}
+            onToggleCard={onToggleCard}
+            onToggleAddMissing={onToggleAddMissing}
             hiddenFields={hiddenFields}
           />
           {diffData && controls}

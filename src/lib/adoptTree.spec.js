@@ -73,7 +73,9 @@ function createGraphCma({ entries, contentTypes }) {
     contentType: {
       get: vi
         .fn()
-        .mockImplementation(async ({ contentTypeId }) => contentTypes[contentTypeId]),
+        .mockImplementation(
+          async ({ contentTypeId }) => contentTypes[contentTypeId],
+        ),
     },
   };
 }
@@ -120,6 +122,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 1,
       changedFields: 1,
       traversedEntries: 1,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.get).toHaveBeenCalledWith({
       entryId: "entry-1",
@@ -177,6 +181,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 1,
       changedFields: 1,
       traversedEntries: 1,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.update).toHaveBeenCalledWith(
       {
@@ -227,6 +233,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 0,
       changedFields: 0,
       traversedEntries: 1,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.update).not.toHaveBeenCalled();
   });
@@ -261,6 +269,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 1,
       changedFields: 1,
       traversedEntries: 1,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.update).toHaveBeenCalledWith(
       expect.any(Object),
@@ -306,6 +316,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 1,
       changedFields: 1,
       traversedEntries: 1,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.update).toHaveBeenCalledWith(
       expect.any(Object),
@@ -364,6 +376,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 1,
       changedFields: 1,
       traversedEntries: 1,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.update).toHaveBeenCalledWith(
       expect.any(Object),
@@ -446,6 +460,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 1,
       changedFields: 1,
       traversedEntries: 1,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.update).toHaveBeenCalledWith(
       expect.any(Object),
@@ -552,6 +568,8 @@ describe("adoptEntryTree", () => {
       updatedEntries: 2,
       changedFields: 2,
       traversedEntries: 2,
+      failures: [],
+      cardSkips: [],
     });
     expect(cma.entry.get).toHaveBeenNthCalledWith(1, {
       entryId: "parent-entry",
@@ -600,5 +618,232 @@ describe("adoptEntryTree", () => {
         },
       }),
     );
+  });
+
+  describe("merge mode preserves existing non-text target values", () => {
+    const link = (id) => ({ sys: { type: "Link", linkType: "Entry", id } });
+    const assetLink = (id) => ({
+      sys: { type: "Link", linkType: "Asset", id },
+    });
+
+    const cases = [
+      {
+        name: "a localized entry link",
+        def: { type: "Link", linkType: "Entry" },
+        src: link("page-ar"),
+        tgt: link("page-co"),
+      },
+      {
+        name: "a localized array of entry links",
+        def: { type: "Array", items: { type: "Link", linkType: "Entry" } },
+        src: [link("card-ar-1"), link("card-ar-2")],
+        tgt: [link("card-co-1")],
+      },
+      {
+        name: "a localized asset link",
+        def: { type: "Link", linkType: "Asset" },
+        src: assetLink("image-ar"),
+        tgt: assetLink("image-co"),
+      },
+      {
+        name: "a localized JSON object",
+        def: { type: "Object" },
+        src: {
+          ctaURL: "https://www.philips.com.ar/a",
+          pageLink: { id: "page-ar" },
+        },
+        tgt: {
+          ctaURL: "https://www.philips.com.co/a",
+          pageLink: { id: "page-co" },
+        },
+      },
+      {
+        name: "a localized boolean",
+        def: { type: "Boolean" },
+        src: true,
+        tgt: false,
+      },
+    ];
+
+    for (const { name, def, src, tgt } of cases) {
+      it(`does not replace ${name} that already has a different target value`, async () => {
+        const entry = createEntry({
+          fields: { field: { "es-AR": src, "es-CO": tgt } },
+        });
+        const cma = createCma({
+          entry,
+          contentType: { fields: [{ id: "field", localized: true, ...def }] },
+        });
+
+        const summary = await adoptEntryTree({
+          cma,
+          entryId: entry.sys.id,
+          environmentId: "master",
+          spaceId: "vvbytozt5evi",
+          sourceLocale: "es-AR",
+          targetLocale: "es-CO",
+          defaultLocale: "es-AR",
+          adoptAll: true,
+          visited: new Set([
+            "page-ar",
+            "page-co",
+            "card-ar-1",
+            "card-ar-2",
+            "card-co-1",
+          ]),
+        });
+
+        expect(summary.changedFields).toBe(0);
+        expect(cma.entry.update).not.toHaveBeenCalled();
+      });
+
+      it(`does not replace ${name} selected per field in merge mode`, async () => {
+        const entry = createEntry({
+          fields: { field: { "es-AR": src, "es-CO": tgt } },
+        });
+        const cma = createCma({
+          entry,
+          contentType: { fields: [{ id: "field", localized: true, ...def }] },
+        });
+
+        await adoptEntryTree({
+          cma,
+          entryId: entry.sys.id,
+          environmentId: "master",
+          spaceId: "vvbytozt5evi",
+          sourceLocale: "es-AR",
+          targetLocale: "es-CO",
+          defaultLocale: "es-AR",
+          selected: { [entry.sys.id]: new Set(["field"]) },
+          visited: new Set([
+            "page-ar",
+            "page-co",
+            "card-ar-1",
+            "card-ar-2",
+            "card-co-1",
+          ]),
+        });
+
+        expect(cma.entry.update).not.toHaveBeenCalled();
+      });
+
+      it(`fills ${name} when the target is empty`, async () => {
+        const entry = createEntry({ fields: { field: { "es-AR": src } } });
+        const cma = createCma({
+          entry,
+          contentType: { fields: [{ id: "field", localized: true, ...def }] },
+        });
+
+        await adoptEntryTree({
+          cma,
+          entryId: entry.sys.id,
+          environmentId: "master",
+          spaceId: "vvbytozt5evi",
+          sourceLocale: "es-AR",
+          targetLocale: "es-CO",
+          defaultLocale: "es-AR",
+          adoptAll: true,
+          visited: new Set(["page-ar", "card-ar-1", "card-ar-2"]),
+        });
+
+        expect(cma.entry.update).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({
+            fields: { field: { "es-AR": src, "es-CO": src } },
+          }),
+        );
+      });
+
+      it(`still replaces ${name} when overwriteAll is set`, async () => {
+        const entry = createEntry({
+          fields: { field: { "es-AR": src, "es-CO": tgt } },
+        });
+        const cma = createCma({
+          entry,
+          contentType: { fields: [{ id: "field", localized: true, ...def }] },
+        });
+
+        await adoptEntryTree({
+          cma,
+          entryId: entry.sys.id,
+          environmentId: "master",
+          spaceId: "vvbytozt5evi",
+          sourceLocale: "es-AR",
+          targetLocale: "es-CO",
+          defaultLocale: "es-AR",
+          adoptAll: true,
+          overwriteAll: true,
+          visited: new Set([
+            "page-ar",
+            "page-co",
+            "card-ar-1",
+            "card-ar-2",
+            "card-co-1",
+          ]),
+        });
+
+        expect(cma.entry.update).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({
+            fields: { field: { "es-AR": src, "es-CO": src } },
+          }),
+        );
+      });
+    }
+
+    it("traverses the target's linked entry when source and target links differ", async () => {
+      const page = createEntry({
+        entryId: "hero-card",
+        contentTypeId: "card",
+        fields: {
+          pageLink: { "es-AR": link("page-ar"), "es-CO": link("page-co") },
+        },
+      });
+      const pageAr = createEntry({
+        entryId: "page-ar",
+        contentTypeId: "page",
+        fields: { title: { "es-AR": "Argentina" } },
+      });
+      const pageCo = createEntry({
+        entryId: "page-co",
+        contentTypeId: "page",
+        fields: { title: { "es-AR": "Argentina" } },
+      });
+      const cma = createGraphCma({
+        entries: { "hero-card": page, "page-ar": pageAr, "page-co": pageCo },
+        contentTypes: {
+          card: {
+            fields: [
+              {
+                id: "pageLink",
+                type: "Link",
+                linkType: "Entry",
+                localized: true,
+              },
+            ],
+          },
+          page: { fields: [{ id: "title", type: "Symbol", localized: true }] },
+        },
+      });
+
+      await adoptEntryTree({
+        cma,
+        entryId: "hero-card",
+        environmentId: "master",
+        spaceId: "vvbytozt5evi",
+        sourceLocale: "es-AR",
+        targetLocale: "es-CO",
+        defaultLocale: "es-AR",
+        adoptAll: true,
+      });
+
+      const fetched = cma.entry.get.mock.calls.map(([args]) => args.entryId);
+      expect(fetched).toEqual(["hero-card", "page-co"]);
+      expect(cma.entry.update).toHaveBeenCalledTimes(1);
+      expect(cma.entry.update).toHaveBeenCalledWith(
+        expect.objectContaining({ entryId: "page-co" }),
+        expect.any(Object),
+      );
+    });
   });
 });

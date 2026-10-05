@@ -5,10 +5,9 @@ function sleep(ms) {
 }
 
 // Create a limiter that ensures <= maxPerSecond
-export function createRateLimiter({ maxPerSecond = 50, jitterMs = 20 } = {}) {
+export function createRateLimiter({ maxPerSecond = 8, jitterMs = 20 } = {}) {
   const calls = [];
   const windowMs = 1000;
-  const minInterval = Math.ceil(windowMs / maxPerSecond);
 
   return async function throttle() {
     const now = Date.now();
@@ -18,8 +17,9 @@ export function createRateLimiter({ maxPerSecond = 50, jitterMs = 20 } = {}) {
     }
 
     if (calls.length >= maxPerSecond) {
+      // sleep until the oldest call drops out of the window
       const wait =
-        Math.max(minInterval - (now - calls[0]), 0) +
+        Math.max(windowMs - (now - calls[0]), 0) +
         Math.floor(Math.random() * jitterMs);
       await sleep(wait);
       return throttle(); // re-check after sleep
@@ -29,8 +29,9 @@ export function createRateLimiter({ maxPerSecond = 50, jitterMs = 20 } = {}) {
   };
 }
 
-// Singleton limiter (tune to be safely under 10 req/s)
-export const throttle = createRateLimiter({ maxPerSecond: 50, jitterMs: 25 });
+// Singleton limiter, kept under the CMA's default limit of 10 req/s so 429
+// backoff doesn't land between an entry's GET and its UPDATE.
+export const throttle = createRateLimiter({ maxPerSecond: 8, jitterMs: 25 });
 
 // Wrap a CMA call with rate limit + retry on 429
 let inflight = 0;

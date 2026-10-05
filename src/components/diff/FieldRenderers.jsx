@@ -1,4 +1,5 @@
 import React from "react";
+import { FieldModeToggles } from "./FieldModeToggles";
 import { Pill, Stack, EntryCard } from "@contentful/f36-components";
 import { documentToReactComponents } from "@contentful/rich-text-react-renderer";
 import {
@@ -66,10 +67,6 @@ export function LTagRenderer({
   const source = extractLTags(node.source);
   const target = extractLTags(node.target);
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   const renderGroup = (label, items) => {
     if (!items || items.length === 0) return <div>(empty)</div>;
@@ -111,26 +108,16 @@ export function LTagRenderer({
       >
         <strong>{fieldKey}</strong>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 12 }}>
@@ -179,10 +166,6 @@ export function TagRenderer({
 
   const hasChanged = JSON.stringify(sourceTags) !== JSON.stringify(targetTags);
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   return (
     <div
@@ -207,26 +190,16 @@ export function TagRenderer({
       >
         <strong>{fieldKey}</strong>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 12 }}>
@@ -523,10 +496,6 @@ export function FrontendTagsRenderer({
         )}`
       : null;
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   return (
     <div
@@ -562,26 +531,16 @@ export function FrontendTagsRenderer({
           )}
         </strong>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
@@ -657,10 +616,6 @@ export function RelatedProductPortfolioRenderer({
         )}`
       : null;
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   const renderEntryCard = (entry) => {
     const entryUrl =
@@ -714,26 +669,16 @@ export function RelatedProductPortfolioRenderer({
           )}
         </strong>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#444" }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
@@ -796,10 +741,6 @@ export function MainImageAssetRenderer({
 
   const changed = JSON.stringify(source) !== JSON.stringify(target);
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   const renderCard = (asset) => {
     if (!asset || !asset.url) {
@@ -884,26 +825,16 @@ export function MainImageAssetRenderer({
           )}
         </strong>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
@@ -1377,10 +1308,6 @@ export function CategoryUrlRenderer({
       ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(fieldKey)}`
       : null;
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   const renderCard = (val) => {
     if (!val) return <div style={fieldBoxStyle}>(empty)</div>;
@@ -1425,26 +1352,16 @@ export function CategoryUrlRenderer({
             <a href={fieldUrl} target="_blank" rel="noopener noreferrer">{fieldKey}</a>
           ) : fieldKey}
         </strong>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1 }}>
@@ -1495,10 +1412,6 @@ export function RichTextObjectRenderer({
       ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(fieldKey)}`
       : null;
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   const renderObj = (val) => {
     if (!val) return <div style={fieldBoxStyle}>(empty)</div>;
@@ -1536,26 +1449,16 @@ export function RichTextObjectRenderer({
             <a href={fieldUrl} target="_blank" rel="noopener noreferrer">{fieldKey}</a>
           ) : fieldKey}
         </strong>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1605,10 +1508,6 @@ export function ServiceDeliverySummaryRenderer({
       ? `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entryId}?focusedField=${encodeURIComponent(fieldKey)}`
       : null;
 
-  const selectedSet = selected?.[entryId];
-  const explicitlySelected = Boolean(selectedSet && selectedSet.has(fieldKey));
-  const overwriteChecked = overwriteAll || Boolean(overwriteSelected?.[entryId]?.has(fieldKey));
-  const mergeChecked = !overwriteChecked && (adoptAll || explicitlySelected);
 
   const renderSubValue = (k, v) => {
     if (v === null || v === undefined || v === "") return <span style={{ color: "#999" }}>(none)</span>;
@@ -1667,26 +1566,16 @@ export function ServiceDeliverySummaryRenderer({
             <a href={fieldUrl} target="_blank" rel="noopener noreferrer">{fieldKey}</a>
           ) : fieldKey}
         </strong>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={mergeChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleField(entryId, fieldKey, e.target.checked)}
-            />
-            Merge
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={overwriteChecked}
-              disabled={overwriteAll}
-              onChange={(e) => onToggleOverwrite(entryId, fieldKey, e.target.checked)}
-            />
-            Overwrite
-          </label>
-        </div>
+        <FieldModeToggles
+          entryId={entryId}
+          fieldKey={fieldKey}
+          selected={selected}
+          adoptAll={adoptAll}
+          overwriteAll={overwriteAll}
+          overwriteSelected={overwriteSelected}
+          onToggleField={onToggleField}
+          onToggleOverwrite={onToggleOverwrite}
+        />
       </div>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
