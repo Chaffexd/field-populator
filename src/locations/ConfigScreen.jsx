@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Button,
   Flex,
@@ -28,7 +28,13 @@ const HIDDEN_FIELDS_DEFAULT = [
 
 export default function ConfigScreen() {
   const sdk = useSDK();
-  const cma = useMemo(() => cmaSDK(sdk), [sdk]);
+
+  // `cmaToken` is what's in the input; `activeToken` is the one we've actually
+  // built a client with (set on load and on save) so we don't fire a request
+  // for every keystroke.
+  const [cmaToken, setCmaToken] = useState("");
+  const [activeToken, setActiveToken] = useState("");
+  const [localesError, setLocalesError] = useState(null);
 
   const [locales, setLocales] = useState([]);
   const [defaultSourceLocale, setDefaultSourceLocale] = useState("");
@@ -43,13 +49,14 @@ export default function ConfigScreen() {
 
   const buildParams = useCallback(
     () => ({
+      cmaToken: cmaToken.trim() || null,
       defaultSourceLocale: defaultSourceLocale || null,
       defaultTargetLocale: defaultTargetLocale || null,
       allowedBases,
       pinnedTargets,
       hiddenFields,
     }),
-    [defaultSourceLocale, defaultTargetLocale, allowedBases, pinnedTargets, hiddenFields],
+    [cmaToken, defaultSourceLocale, defaultTargetLocale, allowedBases, pinnedTargets, hiddenFields],
   );
 
   useEffect(() => {
@@ -59,22 +66,17 @@ export default function ConfigScreen() {
     });
   }, [sdk, buildParams]);
 
+  // Load saved parameters first — the CMA token lives there, and the locale
+  // list below cannot be fetched without it.
   useEffect(() => {
     (async () => {
-      const [params, localesRes] = await Promise.all([
-        sdk.app.getParameters(),
-        callCMA(() =>
-          cma.locale.getMany({
-            environmentId: sdk.ids.environment,
-            spaceId: sdk.ids.space,
-            query: { limit: 1000 },
-          }),
-        ),
-      ]);
-
-      setLocales(localesRes.items);
+      const params = await sdk.app.getParameters();
 
       if (params) {
+        if (params.cmaToken) {
+          setCmaToken(params.cmaToken);
+          setActiveToken(params.cmaToken);
+        }
         if (params.defaultSourceLocale) setDefaultSourceLocale(params.defaultSourceLocale);
         if (params.defaultTargetLocale) setDefaultTargetLocale(params.defaultTargetLocale);
         if (Array.isArray(params.allowedBases)) setAllowedBases(params.allowedBases);
@@ -84,11 +86,53 @@ export default function ConfigScreen() {
 
       sdk.app.setReady();
     })();
-  }, [sdk, cma]);
+  }, [sdk]);
+
+  // Fetch locales with whichever token is currently in effect. Doubles as
+  // validation: a bad token surfaces here as a 401.
+  useEffect(() => {
+    if (!activeToken.trim()) {
+      setLocales([]);
+      setLocalesError(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setLocalesError(null);
+      try {
+        const cma = cmaSDK(sdk, activeToken);
+        const res = await callCMA(() =>
+          cma.locale.getMany({
+            environmentId: sdk.ids.environment,
+            spaceId: sdk.ids.space,
+            query: { limit: 1000 },
+          }),
+        );
+        if (!cancelled) setLocales(res.items);
+      } catch (err) {
+        if (cancelled) return;
+        const status = err?.status ?? err?.response?.status;
+        setLocales([]);
+        setLocalesError(
+          status === 401
+            ? "Authentication failed (401) — this token is invalid or expired."
+            : status === 403
+              ? "Access denied (403) — this token lacks permission to read locales."
+              : `Failed to load locales: ${err?.message ?? "unknown error"}`,
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sdk, activeToken]);
 
   const handleSave = async () => {
     try {
       await sdk.app.setParameters(buildParams());
+      setActiveToken(cmaToken.trim());
       setSaveNote({ variant: "positive", text: "Configuration saved." });
     } catch {
       setSaveNote({ variant: "negative", text: "Failed to save. Please try again." });
@@ -144,6 +188,40 @@ export default function ConfigScreen() {
     <Flex flexDirection="column" style={{ margin: "80px auto", maxWidth: 800 }}>
       <Form>
         <Heading>Locale Populator — Configuration</Heading>
+
+        {/* Management Token */}
+        <div style={{ borderBottom: "1px solid #e5e5e5", paddingBottom: 24, marginBottom: 24 }}>
+          <Heading as="h3">Contentful Management token</Heading>
+          <Paragraph>
+            The app reads and writes entries with this token — nothing else on this
+            screen works until one is saved. Use a Personal Access Token with write
+            access to this space, then save.
+          </Paragraph>
+          <TextInput
+            type="password"
+            value={cmaToken}
+            onChange={(e) => setCmaToken(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            placeholder="CFPAT-…"
+            aria-label="Contentful Management token"
+          />
+          {!activeToken.trim() && (
+            <Note variant="warning" style={{ marginTop: 12 }}>
+              No token saved yet. The locale lists below stay empty, and the dialog will
+              refuse to load for editors until a valid token is saved here.
+            </Note>
+          )}
+          {localesError && (
+            <Note variant="negative" style={{ marginTop: 12 }}>
+              {localesError}
+            </Note>
+          )}
+          <Paragraph style={{ marginTop: 12, fontSize: 12, color: "#666" }}>
+            Stored in this app's installation parameters. Anyone who can read the app
+            installation in this space can read the token — rotate it if that access
+            changes.
+          </Paragraph>
+        </div>
 
         {/* Default Locales */}
         <div style={{ borderBottom: "1px solid #e5e5e5", paddingBottom: 24, marginBottom: 24 }}>

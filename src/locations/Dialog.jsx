@@ -48,12 +48,13 @@ function collectFields(tree, rootEntryId) {
 
 export default function Dialog() {
   const sdk = useSDK();
-  const cma = useMemo(() => {
-    try { return cmaSDK(sdk); } catch { return null; }
-  }, [sdk]);
 
   // Read installation config with fallbacks for backwards compatibility
   const installParams = sdk.parameters?.installation ?? {};
+  const cmaToken = installParams.cmaToken;
+  const cma = useMemo(() => {
+    try { return cmaSDK(sdk, cmaToken); } catch { return null; }
+  }, [sdk, cmaToken]);
   const allowedBases = installParams.allowedBases ?? ALLOWED_BASES_DEFAULT;
   const pinnedTargets = new Set(installParams.pinnedTargets ?? Array.from(PINNED_TARGET_LOCALES));
   const hiddenFields = installParams.hiddenFields ?? HIDDEN_FIELDS_DEFAULT;
@@ -103,7 +104,8 @@ export default function Dialog() {
   // Load locales on mount
   useEffect(() => {
     if (!cma) {
-      setLocalesError("CMA client could not be initialised — check VITE_CMA_KEY in your .env file.");
+      setLocalesError("No Contentful Management token configured — open the Locale Populator app's "
+        + "configuration screen and add one, then reopen this dialog.");
       setLocalesLoading(false);
       return;
     }
